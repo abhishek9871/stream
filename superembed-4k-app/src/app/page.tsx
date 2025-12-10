@@ -12,7 +12,7 @@ export default function Home() {
   const [trending, setTrending] = useState<TMDBMovie[]>([]);
   const [popular, setPopular] = useState<TMDBMovie[]>([]);
   const [topRated, setTopRated] = useState<TMDBMovie[]>([]);
-  const [selectedMovie, setSelectedMovie] = useState<{ tmdbId: number; title: string; poster: string; type: 'movie' | 'tv' } | null>(null);
+  const [selectedMovie, setSelectedMovie] = useState<{ tmdbId: number; title: string; poster: string; type: 'movie' | 'tv'; season?: number; episode?: number } | null>(null);
 
   useEffect(() => {
     const fetchContent = async () => {
@@ -35,12 +35,14 @@ export default function Home() {
   }, []);
 
   const handleMovieSelect = (movie: TMDBMovie) => {
-    // Normalize movie data structure
+    const isTv = movie.media_type === 'tv';
     setSelectedMovie({
       tmdbId: movie.id,
       title: movie.title || movie.name || 'Unknown Title',
       poster: TMDB.getImageUrl(movie.backdrop_path || movie.poster_path, 'original'),
-      type: movie.media_type === 'tv' ? 'tv' : 'movie'
+      type: isTv ? 'tv' : 'movie',
+      // Default to S01E01 for TV shows
+      ...(isTv && { season: 1, episode: 1 })
     });
   };
 
@@ -106,6 +108,8 @@ export default function Home() {
           type={selectedMovie.type}
           title={selectedMovie.title}
           poster={selectedMovie.poster}
+          season={selectedMovie.season}
+          episode={selectedMovie.episode}
           onClose={() => setSelectedMovie(null)}
         />
       )}
