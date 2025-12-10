@@ -69,34 +69,46 @@ export const StreamContainer: React.FC<StreamContainerProps> = ({
             if (!componentMounted.current) return;
 
             if (result.success) {
-                setStatus('Stream found! Processing subtitles...');
-
-                // Process Subdl subtitles (extract from ZIP, convert to VTT)
-                let processedSubtitles: ProcessedSubtitle[] = [];
-                if (result.subtitles && result.subtitles.length > 0) {
-                    try {
-                        processedSubtitles = await processSubtitles(result.subtitles);
-                    } catch (subError) {
-                        console.error('Subtitle processing error:', subError);
-                        // Continue without subtitles
-                    }
-                }
-
-                // Convert processed subtitles to the format expected by MoviePlayer
-                const subtitleTracks = processedSubtitles.map(sub => ({
-                    label: sub.label,
-                    lang: sub.lang,
-                    file: sub.vttUrl, // Now a blob URL to VTT content
-                    default: false
-                }));
-
+                // 🚀 START PLAYBACK IMMEDIATELY - don't wait for subtitles!
+                console.log('[StreamContainer] ✅ Starting playback immediately');
                 setStream({
                     success: true,
                     m3u8Url: result.m3u8Url,
-                    subtitles: subtitleTracks,
+                    subtitles: [], // Start with no subtitles
                     referer: result.referer
                 });
                 setLoading(false);
+
+                // 🎬 PROCESS SUBTITLES IN BACKGROUND (non-blocking)
+                if (result.subtitles && result.subtitles.length > 0) {
+                    console.log(`[StreamContainer] 📥 Processing ${result.subtitles.length} subtitles in background...`);
+
+                    // Process subtitles asynchronously - don't await!
+                    processSubtitles(result.subtitles)
+                        .then(processedSubtitles => {
+                            if (!componentMounted.current) return;
+
+                            // Convert to subtitle tracks format
+                            const subtitleTracks = processedSubtitles.map(sub => ({
+                                label: sub.label,
+                                lang: sub.lang,
+                                file: sub.vttUrl,
+                                default: false
+                            }));
+
+                            console.log(`[StreamContainer] ✅ ${subtitleTracks.length} subtitles ready - updating player`);
+
+                            // Update stream with subtitles (player will reactively update)
+                            setStream(prev => prev ? {
+                                ...prev,
+                                subtitles: subtitleTracks
+                            } : null);
+                        })
+                        .catch(subError => {
+                            console.error('[StreamContainer] Subtitle processing error:', subError);
+                            // Silently fail - playback continues without subtitles
+                        });
+                }
             } else {
                 console.error('Stream extraction failed:', result.error);
                 setError(result.error || 'Failed to find a high-quality stream.');

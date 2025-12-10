@@ -482,6 +482,14 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
             return;
         }
 
+        // Clear any existing tracks first (for dynamic updates)
+        while (video.textTracks.length > 0 && video.firstChild?.nodeName === 'TRACK') {
+            video.removeChild(video.firstChild);
+        }
+        // Remove track elements
+        const existingTracks = video.querySelectorAll('track');
+        existingTracks.forEach(t => t.remove());
+
         console.log(`[Player] Adding ${extracted.subtitles.length} subtitle track(s)`);
 
         extracted.subtitles.forEach((sub, index) => {
@@ -508,6 +516,18 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
             setSubtitlesReady(true);
         }, 500);
     };
+
+    // Watch for subtitle changes (for background loading)
+    useEffect(() => {
+        const video = videoRef.current;
+        if (!video || !extracted.subtitles || extracted.subtitles.length === 0) return;
+
+        // If we already have tracks with the same count, skip
+        if (video.textTracks.length === extracted.subtitles.length) return;
+
+        console.log('[Player] 🎬 Subtitles updated - adding tracks dynamically');
+        addSubtitleTracks(video);
+    }, [extracted.subtitles]);
 
     const handleSubtitleChange = (subtitleFile: string | null) => {
         const video = videoRef.current;
