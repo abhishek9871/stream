@@ -1,0 +1,441 @@
+.videoContainer {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  background: linear-gradient(145deg, #0a0a0a, #1a1a1a);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 0 0 40px rgba(79, 70, 229, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.qualitySelector {
+  display: flex;
+  align-items: center;
+  background: linear-gradient(180deg, #1a1a1a, #0d0d0d);
+  padding: 12px 16px;
+  gap: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.qualityLabel {
+  color: #888;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.qualityDropdown {
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  outline: none;
+}
+
+.qualityDropdown:hover {
+  background: rgba(79, 70, 229, 0.3);
+  border-color: rgba(79, 70, 229, 0.5);
+}
+
+.qualityDropdown option {
+  background: #1a1a1a;
+  color: #fff;
+}
+
+.qualityButton {
+  padding: 8px 18px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #ccc;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.qualityButton:hover:not(:disabled) {
+  background: rgba(79, 70, 229, 0.3);
+  border-color: rgba(79, 70, 229, 0.5);
+  color: white;
+  transform: translateY(-1px);
+}
+
+.qualityButton.active {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  border-color: #4f46e5;
+  color: white;
+  box-shadow: 0 4px 15px rgba(79, 70, 229, 0.4);
+}
+
+.qualityButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.vipBadge {
+  margin-left: auto;
+  padding: 6px 12px;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.qualityInfo {
+  color: #6b7280;
+  font-size: 0.75rem;
+  font-style: italic;
+  margin-left: 8px;
+}
+
+.serverInfo {
+  color: #10b981;
+  font-size: 0.8rem;
+  margin-left: 12px;
+  font-weight: 500;
+}
+
+.playerWrapper {
+  position: relative;
+  padding-bottom: 56.25%;
+  height: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+.video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  cursor: pointer;
+}
+
+/* Loading overlay inside player */
+.loadingOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background: linear-gradient(145deg, #0a0a0a, #1a1a1a);
+  gap: 16px;
+  z-index: 10;
+}
+
+.loadingOverlay p {
+  color: #a5b4fc;
+  font-size: 1rem;
+  text-align: center;
+}
+
+.playerWrapper>div,
+.iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+/* Play Overlay */
+.playOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.playOverlay:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.playButton {
+  width: 80px;
+  height: 80px;
+  background: rgba(79, 70, 229, 0.9);
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 32px;
+  color: white;
+  transition: transform 0.3s, background 0.3s;
+  box-shadow: 0 8px 30px rgba(79, 70, 229, 0.5);
+}
+
+.playOverlay:hover .playButton {
+  transform: scale(1.1);
+  background: rgba(99, 90, 255, 0.95);
+}
+
+/* Controls */
+.controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.9));
+  padding: 40px 16px 16px;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.controls.visible {
+  opacity: 1;
+}
+
+.progressBar {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  cursor: pointer;
+  margin-bottom: 12px;
+  transition: height 0.2s;
+}
+
+.progressBar:hover {
+  height: 8px;
+}
+
+.progressFilled {
+  height: 100%;
+  background: linear-gradient(90deg, #4f46e5, #7c3aed);
+  border-radius: 2px;
+  transition: width 0.1s linear;
+}
+
+.controlsRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.controlButton {
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.controlButton:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.timeDisplay {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.85rem;
+  font-family: monospace;
+}
+
+.volumeControl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: white;
+}
+
+.volumeSlider {
+  width: 80px;
+  height: 4px;
+  cursor: pointer;
+  accent-color: #4f46e5;
+}
+
+.qualityIndicator {
+  margin-left: auto;
+  padding: 4px 10px;
+  background: rgba(79, 70, 229, 0.3);
+  border: 1px solid rgba(79, 70, 229, 0.5);
+  border-radius: 4px;
+  color: #a5b4fc;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+/* Title Bar */
+.titleBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: linear-gradient(180deg, #0d0d0d, #1a1a1a);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.titleBar h3 {
+  color: white;
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.qualityBadge {
+  padding: 4px 10px;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+/* Loading */
+.loading {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 400px;
+  background: linear-gradient(145deg, #0a0a0a, #1a1a1a);
+  border-radius: 16px;
+  color: white;
+  gap: 16px;
+}
+
+.spinner {
+  width: 48px;
+  height: 48px;
+  border: 3px solid rgba(79, 70, 229, 0.2);
+  border-top-color: #4f46e5;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading p {
+  font-size: 1.1rem;
+  color: #a5b4fc;
+  text-align: center;
+}
+
+.loadingSubtext {
+  font-size: 0.85rem !important;
+  color: #6b7280 !important;
+  margin-top: 8px;
+}
+
+/* Error */
+.errorContainer {
+  padding: 40px;
+  background: linear-gradient(145deg, #1a0a0a, #2a1010);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: white;
+  border-radius: 16px;
+  text-align: center;
+}
+
+.errorIcon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.errorContainer p {
+  margin-bottom: 20px;
+  font-size: 1rem;
+  color: #fca5a5;
+}
+
+.retryButton {
+  padding: 12px 28px;
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+  transition: all 0.3s;
+}
+
+.retryButton:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(239, 68, 68, 0.3);
+}
+
+.noStream {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  color: #666;
+  font-size: 1.1rem;
+}
+
+/* Mobile Optimization */
+@media (max-width: 768px) {
+  .videoContainer {
+    border-radius: 0;
+    margin: 0;
+  }
+
+  .qualitySelector {
+    padding: 10px 12px;
+    flex-wrap: wrap;
+  }
+
+  .qualityDropdown {
+    padding: 6px 12px;
+    font-size: 0.8rem;
+  }
+
+  .titleBar {
+    padding: 12px 16px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .titleBar h3 {
+    font-size: 0.95rem;
+    width: 100%;
+  }
+
+  .playButton {
+    width: 60px;
+    height: 60px;
+    font-size: 24px;
+  }
+
+  .controlsRow {
+    gap: 8px;
+  }
+
+  .volumeControl {
+    display: none;
+  }
+}
