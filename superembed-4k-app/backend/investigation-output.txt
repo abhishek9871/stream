@@ -1,0 +1,31 @@
+≡ƒöì SUBTITLE NETWORK INVESTIGATION SCRIPT
+
+======================================================================
+Capturing ALL network requests to find subtitle URLs...
+======================================================================
+
+[Browser] Γ£à Ready
+
+[Nav] Going to: https://multiembed.mov/directstream.php?video_id=238&tmdb=1
+
+[Step 1] Checking for interstitial...
+[Ad] Γ£à Clear
+
+[Step 3] Clicking play...
+[Play] Clicked
+[SUBTITLE] ≡ƒôí API: https://match.adsrvr.org/track/cmf/generic?ttd_pid=xksw9la&ttd_tpi=1&gdpr=0...
+[SUBTITLE] ≡ƒôí API: https://match.adsrvr.org/track/cmb/generic?ttd_pid=xksw9la&ttd_tpi=1&gdpr=0...
+[M3U8] ≡ƒÄ» FOUND: https://wispy-resonance-f4fd.ice-shut619.workers.dev/YwXivN/r/No3NQi9LGLyyjfLzQHFn5MveZBaS+6p/YVpqad...
+file:///C:/Users/VASU/Desktop/stream/superembed-4k-app/backend/node_modules/rebrowser-puppeteer-core/lib/esm/puppeteer/util/assert.js:15
+        throw new Error(message);
+              ^
+
+Error: Requesting main frame too early!
+    at assert (file:///C:/Users/VASU/Desktop/stream/superembed-4k-app/backend/node_modules/rebrowser-puppeteer-core/lib/esm/puppeteer/util/assert.js:15:15)
+    at FrameManager.mainFrame (file:///C:/Users/VASU/Desktop/stream/superembed-4k-app/backend/node_modules/rebrowser-puppeteer-core/lib/esm/puppeteer/cdp/FrameManager.js:232:9)
+    at FrameManager.evaluateOnNewDocument (file:///C:/Users/VASU/Desktop/stream/superembed-4k-app/backend/node_modules/rebrowser-puppeteer-core/lib/esm/puppeteer/cdp/FrameManager.js:254:43)
+    at CdpPage.evaluateOnNewDocument (file:///C:/Users/VASU/Desktop/stream/superembed-4k-app/backend/node_modules/rebrowser-puppeteer-core/lib/esm/puppeteer/cdp/Page.js:730:41)
+    at pageController (file:///C:/Users/VASU/Desktop/stream/superembed-4k-app/backend/node_modules/puppeteer-real-browser/lib/esm/module/pageController.mjs:47:16)
+    at file:///C:/Users/VASU/Desktop/stream/superembed-4k-app/backend/node_modules/puppeteer-real-browser/lib/esm/index.mjs:108:23
+
+Node.js v22.13.1

@@ -1,0 +1,43 @@
+≡ƒöì SUBTITLE NETWORK INVESTIGATION
+
+[Browser] Γ£à Ready
+
+[Nav] https://multiembed.mov/directstream.php?video_id=238&tmdb=1
+
+[Step] Clicking play...
+
+[Step] Selecting vipstream-S...
+[Server] Γ£à vipstream-S clicked
+[M3U8] ≡ƒÄ» https://wispy-resonance-f4fd.ice-shut619.workers.dev/a2FV5i9k1PjNlIdWXlAiNiDoc35B2LN7szH2Jcck4C8aDSc...
+
+[Step] Handling interstitials...
+[Ad] ΓÅ│ Countdown... (1s)
+[Ad] ΓÅ│ Countdown... (2s)
+[Ad] ΓÅ│ Countdown... (3s)
+[Ad] ΓÅ│ Countdown... (4s)
+[Ad] ΓÅ│ Countdown... (5s)
+[Ad] ΓÅ│ Countdown... (6s)
+[Ad] ΓÅ│ Countdown... (7s)
+[Ad] ΓÅ│ Countdown... (8s)
+[Ad] ΓÅ│ Countdown... (9s)
+[Ad] ΓÅ│ Countdown... (10s)
+[Ad] ΓÅ│ Countdown... (11s)
+[Ad] ΓÅ│ Countdown... (12s)
+[Ad] ΓÅ│ Countdown... (13s)
+[Ad] ΓÅ│ Countdown... (14s)
+[Ad] ΓÅ│ Countdown... (15s)
+[Ad] ΓÅ│ Countdown... (16s)
+[Ad] ΓÅ│ Countdown... (17s)
+[Ad] ΓÅ│ Countdown... (18s)
+[Ad] ΓÅ│ Countdown... (19s)
+[Ad] ΓÅ│ Countdown... (20s)
+[Ad] ΓÅ│ Countdown... (21s)
+[Ad] ΓÅ│ Countdown... (22s)
+[Ad] ΓÅ│ Countdown... (23s)
+[Ad] ΓÅ│ Countdown... (24s)
+[Ad] ΓÅ│ Countdown... (25s)
+
+[Step] Starting video...
+
+[Step] Watching network for 20 seconds...
+

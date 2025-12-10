@@ -482,25 +482,27 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
             return;
         }
 
-        extracted.subtitles.forEach((sub) => {
+        console.log(`[Player] Adding ${extracted.subtitles.length} subtitle track(s)`);
+
+        extracted.subtitles.forEach((sub, index) => {
             const track = document.createElement('track');
             track.kind = 'subtitles';
             track.label = sub.label;
-            track.srclang = sub.label.toLowerCase().substring(0, 2);
+            track.srclang = 'en';
             track.src = sub.file;
-            track.default = false;
+            track.default = index === 0; // First subtitle is best quality, set as default
             video.appendChild(track);
         });
 
+        // Auto-enable the first (best quality) subtitle
         setTimeout(() => {
-            const englishSub = findEnglishSubtitle(extracted.subtitles!);
-            if (englishSub) {
-                setActiveSubtitle(englishSub.file);
-                for (let i = 0; i < video.textTracks.length; i++) {
-                    if (video.textTracks[i].label === englishSub.label) {
-                        video.textTracks[i].mode = 'showing';
-                        break;
-                    }
+            // Subtitles are already sorted by quality, use the first one
+            const bestSub = extracted.subtitles![0];
+            if (bestSub) {
+                console.log(`[Player] Auto-selecting best subtitle: ${bestSub.label.substring(0, 50)}...`);
+                setActiveSubtitle(bestSub.file);
+                if (video.textTracks.length > 0) {
+                    video.textTracks[0].mode = 'showing';
                 }
             }
             setSubtitlesReady(true);

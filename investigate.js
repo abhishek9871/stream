@@ -31,77 +31,6 @@ const CONFIG = {
     }
 };
 
-// Subdl API Configuration for English subtitles
-const SUBDL_CONFIG = {
-    apiKey: '8kyy_Cl0S7OJnXPdVAAkxeKE5dFhkKXr',
-    baseUrl: 'https://api.subdl.com/api/v1/subtitles',
-    downloadBase: 'https://dl.subdl.com/subtitle'
-};
-
-// Fetch English subtitles from Subdl API
-async function fetchSubtitlesFromSubdl(tmdbId, type, season = null, episode = null) {
-    console.log(`[Subdl] Fetching English subtitles for ${type} TMDB:${tmdbId}${season ? ` S${season}E${episode}` : ''}...`);
-
-    try {
-        const params = new URLSearchParams({
-            api_key: SUBDL_CONFIG.apiKey,
-            tmdb_id: tmdbId,
-            type: type,
-            languages: 'EN',
-            subs_per_page: '30' // Get maximum subtitles
-        });
-
-        // Add season/episode for TV shows
-        if (type === 'tv' && season && episode) {
-            params.append('season_number', season);
-            params.append('episode_number', episode);
-        }
-
-        const url = `${SUBDL_CONFIG.baseUrl}?${params.toString()}`;
-        console.log(`[Subdl] API URL: ${url.replace(SUBDL_CONFIG.apiKey, '***')}`);
-
-        const response = await axios.get(url, { timeout: 10000 });
-
-        if (response.data && response.data.subtitles && response.data.subtitles.length > 0) {
-            // Return ALL English subtitles (frontend will process and sort them)
-            const subtitles = response.data.subtitles
-                .filter(sub => sub.lang === 'English' || sub.language === 'EN' || sub.language === 'English')
-                .map(sub => {
-                    // Build download URL - ensure it's absolute
-                    let downloadUrl = sub.url || '';
-
-                    // If URL is relative, prepend the download base
-                    if (downloadUrl.startsWith('/')) {
-                        downloadUrl = 'https://dl.subdl.com' + downloadUrl;
-                    } else if (!downloadUrl.startsWith('http')) {
-                        // Build from subtitle ID
-                        downloadUrl = `${SUBDL_CONFIG.downloadBase}/${sub.id || sub.subtitle_id}.zip`;
-                    }
-
-                    return {
-                        label: sub.release_name || sub.name || 'English',
-                        lang: 'en',
-                        file: downloadUrl,
-                        author: sub.author || 'Unknown',
-                        downloads: sub.downloads || 0,
-                        hi: sub.hi || false, // Hearing impaired
-                        source: 'subdl'
-                    };
-                });
-
-            console.log(`[Subdl] ✅ Found ${subtitles.length} English subtitle(s)`);
-            subtitles.forEach((s, i) => console.log(`   ${i + 1}. ${s.label}`));
-            return subtitles;
-        } else {
-            console.log('[Subdl] ⚠️ No subtitles found in response');
-            return [];
-        }
-    } catch (error) {
-        console.error('[Subdl] ❌ API Error:', error.message);
-        return [];
-    }
-}
-
 // Browser Session - keep alive for reuse
 let browserInstance = null;
 let pageInstance = null;
@@ -260,12 +189,56 @@ app.get('/api/extract', async (req, res) => {
             playerIframeFound = true;
         }
 
-        // 📜 Capture Subtitles
-        if ((url.includes('.vtt') || url.includes('.srt')) && !url.includes('blob:')) {
-            if (!foundSubtitles.some(s => s.file === url)) {
-                console.log(`[Sub] Found: ${url.substring(0, 80)}...`);
-                foundSubtitles.push({ label: 'English', file: url });
+        // 📜 Capture Subtitles - Enhanced detection
+        const urlLower = url.toLowerCase();
+
+        // Check for subtitle file extensions
+        const isSubtitleFile = urlLower.endsWith('.vtt') ||
+            urlLower.endsWith('.srt') ||
+            urlLower.endsWith('.ass') ||
+            urlLower.endsWith('.sub') ||
+            urlLower.endsWith('.ssa');
+
+        // Check for subtitle-related URL patterns
+        const hasSubtitleKeyword = urlLower.includes('/sub') ||
+            urlLower.includes('subtitle') ||
+            urlLower.includes('caption') ||
+            urlLower.includes('/srt/') ||
+            urlLower.includes('/vtt/') ||
+            urlLower.includes('/track') ||
+            urlLower.includes('_eng.') ||
+            urlLower.includes('_english.') ||
+            urlLower.includes('/eng/') ||
+            urlLower.includes('lang=en') ||
+            urlLower.includes('language=en');
+
+        if ((isSubtitleFile || hasSubtitleKeyword) && !url.includes('blob:')) {
+            // Extract language info from URL if present
+            let label = 'English';
+            let lang = 'en';
+
+            // Try to detect language from URL
+            if (urlLower.includes('english') || urlLower.includes('/en/') || urlLower.includes('_en.') || urlLower.includes('lang=en')) {
+                label = 'English';
+                lang = 'en';
+            } else if (urlLower.includes('_sdh.') || urlLower.includes('sdh')) {
+                label = 'English (SDH)';
+                lang = 'en';
             }
+
+            // Only add if not already captured
+            if (!foundSubtitles.some(s => s.file === url)) {
+                console.log(`[SUBTITLE] 🎯 Found: ${url}`);
+                foundSubtitles.push({ label, lang, file: url });
+            }
+        }
+
+        // INVESTIGATION: Log any URL that might be subtitle-related for analysis
+        const contentType = response.headers()['content-type'] || '';
+        if (contentType.includes('text/vtt') ||
+            contentType.includes('application/x-subrip') ||
+            contentType.includes('text/plain') && hasSubtitleKeyword) {
+            console.log(`[SUBTITLE-CONTENT-TYPE] 📋 ${contentType}: ${url.substring(0, 100)}...`);
         }
     };
 
@@ -896,208 +869,166 @@ app.get('/api/extract', async (req, res) => {
         }
 
         // ========================================
-        // STEP 5: Extract English Subtitles
+        // STEP 5: Investigate Subtitles via DOM Analysis
+        // Instead of clicking through UI, analyze the DOM for subtitle data
         // ========================================
         if (foundM3U8) {
-            console.log('[Step 5] Extracting English subtitles...');
+            console.log('[Step 5] Investigating subtitles via DOM analysis...');
+
+            // Wait for player to fully load
+            await sleep(5000);
+
             try {
-                // IMPORTANT: Wait for interstitial ad to fully load after M3U8 capture
-                console.log('[Subtitles] Step 5.1: Waiting for interstitial to load...');
-                await sleep(5000); // Give 5 seconds for interstitial to appear
-                await closeAllPopups(browser, mainPage);
-
-                // Handle interstitial ad with proper mouse clicking
-                console.log('[Subtitles] Step 5.2: Checking for interstitial ads...');
-
-                for (let attempt = 0; attempt < 15; attempt++) {
-                    await closeAllPopups(browser, mainPage);
-
-                    // Check page state and find Skip ad button position
-                    const adState = await page.evaluate(() => {
-                        const bodyText = document.body?.innerText || '';
-
-                        // Check if interstitial is present
-                        const hasInterstitial = bodyText.includes('Access Content') ||
-                            bodyText.includes('Play Now') ||
-                            bodyText.includes('Skip ad');
-
-                        if (!hasInterstitial) {
-                            return { hasInterstitial: false, skipPos: null };
-                        }
-
-                        // Find Skip ad button position
-                        const allElements = document.querySelectorAll('*');
-                        for (const el of allElements) {
-                            const text = (el.textContent || '').trim().toLowerCase();
-                            if (text === 'skip ad' || text === 'skip') {
-                                const rect = el.getBoundingClientRect();
-                                if (rect.width > 0 && rect.height > 0 && rect.x > 0) {
-                                    return {
-                                        hasInterstitial: true,
-                                        skipPos: { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
-                                    };
-                                }
-                            }
-                        }
-
-                        return { hasInterstitial: true, skipPos: null };
-                    });
-
-                    if (!adState.hasInterstitial) {
-                        console.log('[Subtitles] ✅ No interstitial blocking - ready for settings');
-                        break;
-                    }
-
-                    if (adState.skipPos) {
-                        console.log(`[Subtitles] Found Skip Ad at (${Math.round(adState.skipPos.x)}, ${Math.round(adState.skipPos.y)})`);
-
-                        // Use mouse movement and click (more reliable than DOM click)
-                        await page.mouse.move(adState.skipPos.x, adState.skipPos.y, { steps: 10 });
-                        await sleep(500);
-                        await page.mouse.click(adState.skipPos.x, adState.skipPos.y);
-                        console.log('[Subtitles] ✅ Clicked Skip Ad');
-
-                        await sleep(3000);
-                        await closeAllPopups(browser, mainPage);
-                        break; // Ad should be gone now
-                    } else {
-                        console.log(`[Subtitles] Interstitial present, waiting for Skip button... (${attempt + 1}/15)`);
-                    }
-
-                    await sleep(1000);
-                }
-
-                await sleep(2000);
-                await closeAllPopups(browser, mainPage);
-
-                // Find the vipstream iframe
-                console.log('[Subtitles] Step 5.2: Finding player iframe...');
-                let targetFrame = null;
+                // Analyze all frames for subtitle information
                 for (const frame of page.frames()) {
                     const frameUrl = frame.url();
                     if (frameUrl.includes('vipstream') || frameUrl.includes('vfx.php')) {
-                        targetFrame = frame;
-                        console.log(`[Subtitles] Found iframe: ${frameUrl.substring(0, 60)}...`);
-                        break;
-                    }
-                }
+                        console.log(`\n[Subtitles] Analyzing iframe: ${frameUrl.substring(0, 60)}...`);
 
-                if (targetFrame) {
-                    // Move mouse to show controls
-                    await page.mouse.move(640, 400);
-                    await sleep(500);
+                        const domSubtitles = await frame.evaluate(() => {
+                            const results = {
+                                videoTracks: [],
+                                trackElements: [],
+                                pljsConfig: null,
+                                dataAttributes: [],
+                                scriptSubtitles: []
+                            };
 
-                    // Click Settings button (gear icon) - try on iframe first
-                    console.log('[Subtitles] Step 5.3: Clicking settings button...');
-                    const settingsClicked = await targetFrame.evaluate(() => {
-                        // Common player settings button selectors
-                        const selectors = [
-                            '.pljssettings',
-                            '.plyr__control[data-plyr="settings"]',
-                            '[class*="settings"]',
-                            '.jw-icon-settings',
-                            '.vjs-settings-button',
-                            'button[aria-label="Settings"]',
-                            '[class*="gear"]',
-                            '[class*="cog"]'
-                        ];
-
-                        for (const sel of selectors) {
-                            const el = document.querySelector(sel);
-                            if (el) {
-                                el.click();
-                                return { success: true, selector: sel };
-                            }
-                        }
-
-                        // Look for settings icon by SVG or icon
-                        const allClickables = document.querySelectorAll('button, div[role="button"], [class*="btn"], svg');
-                        for (const el of allClickables) {
-                            const className = el.className?.toString() || '';
-                            const parent = el.parentElement;
-                            const parentClass = parent?.className?.toString() || '';
-
-                            if (className.includes('setting') || className.includes('gear') ||
-                                parentClass.includes('setting') || parentClass.includes('gear')) {
-                                el.click();
-                                return { success: true, selector: 'icon-match' };
-                            }
-                        }
-
-                        return { success: false };
-                    });
-
-                    if (settingsClicked.success) {
-                        console.log(`[Subtitles] ✅ Settings opened via: ${settingsClicked.selector}`);
-                        await sleep(1500);
-
-                        // Click on Subtitle option
-                        console.log('[Subtitles] Step 5.4: Opening subtitle menu...');
-                        const subtitleMenuClicked = await targetFrame.evaluate(() => {
-                            // Look for subtitle text in menu items
-                            const allItems = document.querySelectorAll('div, span, li, a, button');
-                            for (const item of allItems) {
-                                const text = (item.textContent || '').toLowerCase().trim();
-                                const isClickable = item.closest('[class*="menu"]') ||
-                                    item.closest('[class*="settings"]') ||
-                                    item.closest('[class*="dropdown"]');
-
-                                if (isClickable && (text === 'subtitle' || text === 'subtitles' || text.startsWith('subtitle'))) {
-                                    item.click();
-                                    return true;
-                                }
-                            }
-                            return false;
-                        });
-
-                        if (subtitleMenuClicked) {
-                            console.log('[Subtitles] ✅ Subtitle menu opened');
-                            await sleep(1500);
-
-                            // Extract English subtitles from the list
-                            console.log('[Subtitles] Step 5.5: Extracting English subtitles...');
-                            const englishSubs = await targetFrame.evaluate(() => {
-                                const subtitles = [];
-                                const seen = new Set();
-
-                                // Get all text items that could be subtitle options
-                                const items = document.querySelectorAll('div, span, li');
-
-                                for (const item of items) {
-                                    const text = (item.textContent || '').trim();
-                                    const textLower = text.toLowerCase();
-
-                                    // Match English variants
-                                    if (textLower.includes('english') && !seen.has(text) && text.length < 50) {
-                                        // Check if this looks like a subtitle option (not a header)
-                                        if (!textLower.includes('quality') && !textLower.includes('speed')) {
-                                            subtitles.push({ label: text, lang: 'en' });
-                                            seen.add(text);
-                                        }
+                            // 1. Check video element's textTracks
+                            const videos = document.querySelectorAll('video');
+                            videos.forEach(video => {
+                                if (video.textTracks) {
+                                    for (let i = 0; i < video.textTracks.length; i++) {
+                                        const track = video.textTracks[i];
+                                        results.videoTracks.push({
+                                            kind: track.kind,
+                                            label: track.label,
+                                            language: track.language,
+                                            mode: track.mode,
+                                            id: track.id
+                                        });
                                     }
                                 }
-                                return subtitles;
                             });
 
-                            if (englishSubs.length > 0) {
-                                console.log(`[Subtitles] ✅ Found ${englishSubs.length} English subtitle(s):`);
-                                englishSubs.forEach(s => console.log(`   - ${s.label}`));
-                                foundSubtitles = englishSubs;
-                            } else {
-                                console.log('[Subtitles] ⚠️ No English subtitles found');
+                            // 2. Check <track> elements in DOM
+                            document.querySelectorAll('track').forEach(track => {
+                                results.trackElements.push({
+                                    kind: track.kind,
+                                    label: track.label,
+                                    srclang: track.srclang,
+                                    src: track.src,
+                                    default: track.default
+                                });
+                            });
+
+                            // 3. Look for PlayerJS (pljs) config in window
+                            if (window.Playerjs) {
+                                try {
+                                    results.pljsConfig = JSON.stringify(window.Playerjs).substring(0, 500);
+                                } catch (e) { }
                             }
 
-                            // Close menu
-                            await targetFrame.evaluate(() => document.body.click());
+                            // 4. Check for data attributes with subtitle info
+                            document.querySelectorAll('[data-subtitle], [data-subs], [data-tracks], [data-captions], [data-config]').forEach(el => {
+                                results.dataAttributes.push({
+                                    tag: el.tagName,
+                                    dataset: JSON.stringify(el.dataset).substring(0, 300)
+                                });
+                            });
+
+                            // 5. Search script content for subtitle URLs
+                            document.querySelectorAll('script').forEach(script => {
+                                const content = script.textContent || '';
+
+                                // Look for VTT/SRT URLs in scripts
+                                const vttMatches = content.match(/https?:\/\/[^"'\s]+\.vtt/gi) || [];
+                                const srtMatches = content.match(/https?:\/\/[^"'\s]+\.srt/gi) || [];
+
+                                vttMatches.forEach(url => {
+                                    results.scriptSubtitles.push({ type: 'vtt', url });
+                                });
+                                srtMatches.forEach(url => {
+                                    results.scriptSubtitles.push({ type: 'srt', url });
+                                });
+
+                                // Look for subtitle config objects
+                                const subConfigMatch = content.match(/["']?subtitles?["']?\s*:\s*\[([^\]]+)\]/i);
+                                if (subConfigMatch) {
+                                    results.scriptSubtitles.push({
+                                        type: 'config',
+                                        content: subConfigMatch[0].substring(0, 500)
+                                    });
+                                }
+
+                                // Look for tracks config
+                                const tracksMatch = content.match(/["']?tracks?["']?\s*:\s*\[([^\]]+)\]/i);
+                                if (tracksMatch) {
+                                    results.scriptSubtitles.push({
+                                        type: 'tracks-config',
+                                        content: tracksMatch[0].substring(0, 500)
+                                    });
+                                }
+                            });
+
+                            return results;
+                        });
+
+                        // Log findings
+                        console.log('\n📋 VIDEO TEXT TRACKS:');
+                        if (domSubtitles.videoTracks.length > 0) {
+                            domSubtitles.videoTracks.forEach((t, i) => {
+                                console.log(`  ${i + 1}. kind="${t.kind}" label="${t.label}" lang="${t.language}" mode="${t.mode}"`);
+                            });
                         } else {
-                            console.log('[Subtitles] ⚠️ Could not find Subtitle option in menu');
+                            console.log('  (none found)');
                         }
-                    } else {
-                        console.log('[Subtitles] ⚠️ Could not find Settings button');
+
+                        console.log('\n📋 <TRACK> ELEMENTS:');
+                        if (domSubtitles.trackElements.length > 0) {
+                            domSubtitles.trackElements.forEach((t, i) => {
+                                console.log(`  ${i + 1}. kind="${t.kind}" label="${t.label}" srclang="${t.srclang}"`);
+                                if (t.src) console.log(`     src: ${t.src}`);
+                            });
+                        } else {
+                            console.log('  (none found)');
+                        }
+
+                        console.log('\n📋 DATA ATTRIBUTES:');
+                        if (domSubtitles.dataAttributes.length > 0) {
+                            domSubtitles.dataAttributes.forEach((d, i) => {
+                                console.log(`  ${i + 1}. <${d.tag}> ${d.dataset}`);
+                            });
+                        } else {
+                            console.log('  (none found)');
+                        }
+
+                        console.log('\n📋 SUBTITLES FROM SCRIPTS:');
+                        if (domSubtitles.scriptSubtitles.length > 0) {
+                            domSubtitles.scriptSubtitles.forEach((s, i) => {
+                                console.log(`  ${i + 1}. [${s.type}] ${s.url || s.content}`);
+                                // Add these to foundSubtitles if they're URLs
+                                if (s.url && (s.url.includes('english') || s.url.includes('/en/') || s.url.includes('_en.'))) {
+                                    if (!foundSubtitles.some(sub => sub.file === s.url)) {
+                                        foundSubtitles.push({ label: 'English', lang: 'en', file: s.url });
+                                        console.log(`     ✅ Added to foundSubtitles`);
+                                    }
+                                }
+                            });
+                        } else {
+                            console.log('  (none found)');
+                        }
+
+                        if (domSubtitles.pljsConfig) {
+                            console.log('\n📋 PLAYERJS CONFIG:');
+                            console.log(`  ${domSubtitles.pljsConfig}`);
+                        }
                     }
-                } else {
-                    console.log('[Subtitles] ⚠️ Could not find vipstream iframe');
                 }
+
+                console.log(`\n[Subtitles] ✅ Total captured: ${foundSubtitles.length} subtitle(s)`);
+                foundSubtitles.forEach((s, i) => console.log(`  ${i + 1}. ${s.label}: ${s.file?.substring(0, 80)}...`));
+
             } catch (subError) {
                 console.log('[Subtitles] ⚠️ Error:', subError.message);
             }
@@ -1130,20 +1061,16 @@ app.get('/api/extract', async (req, res) => {
     // Return results
     if (foundM3U8) {
         const referer = capturedReferer || 'https://streamingnow.mov/';
-        console.log('[Result] ✅ M3U8 FOUND');
+        console.log('[Result] ✅ SUCCESS');
         console.log(`[Result] M3U8: ${foundM3U8.substring(0, 80)}...`);
 
         const proxyBase = `http://${req.get('host')}`;
         const proxiedM3U8 = `${proxyBase}/api/proxy/m3u8?url=${encodeURIComponent(foundM3U8)}&referer=${encodeURIComponent(referer)}`;
 
-        // Fetch subtitles from Subdl API (much more reliable than scraping)
-        console.log('[Result] Fetching subtitles from Subdl API...');
-        const subdlSubtitles = await fetchSubtitlesFromSubdl(
-            tmdbId,
-            type,
-            type === 'tv' ? season : null,
-            type === 'tv' ? episode : null
-        );
+        const proxiedSubs = foundSubtitles.map(s => ({
+            label: s.label,
+            file: `${proxyBase}/api/proxy/segment?url=${encodeURIComponent(s.file)}&referer=${encodeURIComponent(referer)}`
+        }));
 
         // Release extraction lock
         isExtracting = false;
@@ -1152,7 +1079,7 @@ app.get('/api/extract', async (req, res) => {
             success: true,
             m3u8Url: foundM3U8,
             proxiedM3U8Url: proxiedM3U8,
-            subtitles: subdlSubtitles, // Subtitles from Subdl API
+            subtitles: proxiedSubs,
             referer: referer,
             provider: 'vipstream-s'
         });

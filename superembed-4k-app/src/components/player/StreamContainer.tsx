@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { MoviePlayer } from './MoviePlayer';
 import SuperEmbedService from '../../services/SuperEmbedService';
 import { ExtractedStream } from '../../types/stream';
+import { processSubtitles, cleanupSubtitleUrls, ProcessedSubtitle } from '../../services/SubtitleService';
 
 interface StreamContainerProps {
     tmdbId?: number;
@@ -68,11 +69,31 @@ export const StreamContainer: React.FC<StreamContainerProps> = ({
             if (!componentMounted.current) return;
 
             if (result.success) {
-                setStatus('Stream found! formatting...');
+                setStatus('Stream found! Processing subtitles...');
+
+                // Process Subdl subtitles (extract from ZIP, convert to VTT)
+                let processedSubtitles: ProcessedSubtitle[] = [];
+                if (result.subtitles && result.subtitles.length > 0) {
+                    try {
+                        processedSubtitles = await processSubtitles(result.subtitles);
+                    } catch (subError) {
+                        console.error('Subtitle processing error:', subError);
+                        // Continue without subtitles
+                    }
+                }
+
+                // Convert processed subtitles to the format expected by MoviePlayer
+                const subtitleTracks = processedSubtitles.map(sub => ({
+                    label: sub.label,
+                    lang: sub.lang,
+                    file: sub.vttUrl, // Now a blob URL to VTT content
+                    default: false
+                }));
+
                 setStream({
                     success: true,
                     m3u8Url: result.m3u8Url,
-                    subtitles: result.subtitles,
+                    subtitles: subtitleTracks,
                     referer: result.referer
                 });
                 setLoading(false);
