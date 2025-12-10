@@ -10,8 +10,8 @@
   --font-display: var(--font-display);
   --font-body: var(--font-body);
 
-  --animate-fade-in: fadeIn 0.5s ease-out;
-  --animate-slide-up: slideUp 0.5s ease-out;
+  --animate-fade-in: fadeIn 0.5s ease-out forwards;
+  --animate-slide-up: slideUp 0.5s ease-out forwards;
   --animate-pulse-slow: pulse 3s infinite;
 
   @keyframes fadeIn {
