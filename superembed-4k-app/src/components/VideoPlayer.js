@@ -28,9 +28,12 @@ const VideoPlayer = ({ imdbId, tmdbId, title, type = 'movie', season, episode })
     // Step 1: Extract stream from backend
     useEffect(() => {
         let isMounted = true;
+        let timeoutId = null;
 
         const extractStream = async () => {
             try {
+                if (!isMounted) return;
+
                 setLoading(true);
                 setError(null);
                 setPlayerReady(false);
@@ -65,10 +68,14 @@ const VideoPlayer = ({ imdbId, tmdbId, title, type = 'movie', season, episode })
             }
         };
 
-        extractStream();
+        // Debounce the call to prevent double-firing in Strict Mode
+        timeoutId = setTimeout(() => {
+            extractStream();
+        }, 800);
 
         return () => {
             isMounted = false;
+            if (timeoutId) clearTimeout(timeoutId);
         };
     }, [imdbId, tmdbId, type, season, episode]);
 

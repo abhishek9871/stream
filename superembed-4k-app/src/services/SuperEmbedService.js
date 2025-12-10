@@ -14,59 +14,79 @@ class SuperEmbedService {
    * @param {number} episode - Episode number (for TV)
    */
   static async extractStream(imdbId, tmdbId = null, type = 'movie', season = null, episode = null) {
-    try {
-      // Build query params
-      const params = new URLSearchParams();
+    const maxRetries = 12; // Will retry for up to 1 minute (12 * 5 seconds)
+    let retryCount = 0;
 
-      if (tmdbId) {
-        params.append('tmdbId', tmdbId.toString());
-      } else if (imdbId) {
-        params.append('imdbId', imdbId);
-      }
+    while (retryCount < maxRetries) {
+      try {
+        // Build query params
+        const params = new URLSearchParams();
 
-      params.append('type', type);
-
-      if (type === 'tv' && season && episode) {
-        params.append('season', season.toString());
-        params.append('episode', episode.toString());
-      }
-
-      const url = `${SCRAPER_API_URL}/api/extract?${params.toString()}`;
-      console.log('[SuperEmbedService] Fetching:', url);
-
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json'
+        if (tmdbId) {
+          params.append('tmdbId', tmdbId.toString());
+        } else if (imdbId) {
+          params.append('imdbId', imdbId);
         }
-      });
 
-      const data = await response.json();
+        params.append('type', type);
 
-      if (data.success) {
-        console.log('[SuperEmbedService] ✅ Stream extracted successfully');
-        return {
-          success: true,
-          m3u8Url: data.proxiedM3U8Url || data.m3u8Url,
-          rawM3U8Url: data.m3u8Url,
-          subtitles: data.subtitles || [],
-          referer: data.referer,
-          provider: data.provider
-        };
-      } else {
-        console.error('[SuperEmbedService] ❌ Extraction failed:', data.error);
+        if (type === 'tv' && season && episode) {
+          params.append('season', season.toString());
+          params.append('episode', episode.toString());
+        }
+
+        const url = `${SCRAPER_API_URL}/api/extract?${params.toString()}`;
+        console.log('[SuperEmbedService] Fetching:', url);
+
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json'
+          }
+        });
+
+        // Handle "extraction in progress" - wait and retry
+        if (response.status === 429) {
+          retryCount++;
+          console.log(`[SuperEmbedService] ⏳ Extraction in progress, waiting... (attempt ${retryCount}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+          continue;
+        }
+
+        const data = await response.json();
+
+        if (data.success) {
+          console.log('[SuperEmbedService] ✅ Stream extracted successfully');
+          return {
+            success: true,
+            m3u8Url: data.proxiedM3U8Url || data.m3u8Url,
+            rawM3U8Url: data.m3u8Url,
+            subtitles: data.subtitles || [],
+            referer: data.referer,
+            provider: data.provider
+          };
+        } else {
+          console.error('[SuperEmbedService] ❌ Extraction failed:', data.error);
+          return {
+            success: false,
+            error: data.error || 'Unknown error'
+          };
+        }
+      } catch (error) {
+        console.error('[SuperEmbedService] ❌ Network error:', error);
         return {
           success: false,
-          error: data.error || 'Unknown error'
+          error: error.message || 'Network error'
         };
       }
-    } catch (error) {
-      console.error('[SuperEmbedService] ❌ Network error:', error);
-      return {
-        success: false,
-        error: error.message || 'Network error'
-      };
     }
+
+    // Exhausted retries
+    console.error('[SuperEmbedService] ❌ Extraction timed out after retries');
+    return {
+      success: false,
+      error: 'Extraction timed out - another extraction may be in progress'
+    };
   }
 
   /**

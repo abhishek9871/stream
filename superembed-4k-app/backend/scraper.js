@@ -9,6 +9,16 @@ const PORT = process.env.PORT || 7860;
 app.use(cors());
 app.use(express.json());
 
+// Global error handlers to prevent process crash
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[Global] Unhandled Rejection:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('[Global] Uncaught Exception:', error.message);
+    // Don't exit - keep server running
+});
+
 // SuperEmbed VIP Stream Configuration
 const CONFIG = {
     getMovieUrl: (tmdbId, imdbId) => {
@@ -25,7 +35,23 @@ const CONFIG = {
 let browserInstance = null;
 let pageInstance = null;
 
-async function getBrowser() {
+// Request lock to prevent concurrent extractions
+let isExtracting = false;
+let lastExtractionId = null;
+
+async function getBrowser(forceRestart = false) {
+    // If force restart or browser is corrupted, close and relaunch
+    if (forceRestart && browserInstance) {
+        console.log('[Browser] 🔄 Force restarting browser...');
+        try {
+            await browserInstance.close();
+        } catch (ex) {
+            console.log('[Browser] Close error (ignored):', ex.message);
+        }
+        browserInstance = null;
+        pageInstance = null;
+    }
+
     // If browser and page exist and are valid, reuse them
     if (browserInstance && pageInstance) {
         try {
@@ -93,11 +119,24 @@ app.get('/api/extract', async (req, res) => {
     const contentId = `${type}-${tmdbId || imdbId}`;
     console.log(`\n[Extract] ========== ${contentId} ==========`);
 
+    // Check if another extraction is in progress
+    if (isExtracting) {
+        console.log('[Extract] ⚠️ Another extraction in progress, please wait');
+        return res.status(429).json({ success: false, error: 'Extraction in progress, please wait' });
+    }
+
+    isExtracting = true;
+
+    // Force browser restart if switching to different content
+    const needsRestart = lastExtractionId !== null && lastExtractionId !== contentId;
+    lastExtractionId = contentId;
+
     let browser, page;
     try {
-        ({ browser, page } = await getBrowser());
+        ({ browser, page } = await getBrowser(needsRestart));
     } catch (e) {
         console.error('[Browser] Launch failed:', e.message);
+        isExtracting = false;
         return res.status(500).json({ success: false, error: 'Browser launch failed' });
     }
 
@@ -787,6 +826,18 @@ app.get('/api/extract', async (req, res) => {
 
     } catch (e) {
         console.error('[Extract] Error:', e.message);
+        // Release extraction lock on error
+        isExtracting = false;
+
+        // Try cleanup even on error
+        try {
+            page.off('response', responseHandler);
+            page.off('request', requestHandler);
+            browser.off('targetcreated', popupHandler);
+            await page.setRequestInterception(false);
+        } catch (cleanupErr) { }
+
+        return res.status(500).json({ success: false, error: 'Extraction error: ' + e.message });
     }
 
     // Cleanup - IMPORTANT: remove all handlers and disable interception
@@ -811,6 +862,9 @@ app.get('/api/extract', async (req, res) => {
             file: `${proxyBase}/api/proxy/segment?url=${encodeURIComponent(s.file)}&referer=${encodeURIComponent(referer)}`
         }));
 
+        // Release extraction lock
+        isExtracting = false;
+
         res.json({
             success: true,
             m3u8Url: foundM3U8,
@@ -821,6 +875,8 @@ app.get('/api/extract', async (req, res) => {
         });
     } else {
         console.log('[Result] ❌ FAILED - No M3U8 found');
+        // Release extraction lock
+        isExtracting = false;
         res.status(500).json({ success: false, error: 'Failed to extract M3U8 stream' });
     }
 });
