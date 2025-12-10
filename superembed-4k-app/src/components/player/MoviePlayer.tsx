@@ -534,29 +534,51 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
 
         console.log(`[Player] Adding ${extracted.subtitles.length} subtitle track(s)`);
 
+        const bestSub = extracted.subtitles[0];
+        let firstTrackLoaded = false;
+
         extracted.subtitles.forEach((sub, index) => {
             const track = document.createElement('track');
             track.kind = 'subtitles';
             track.label = sub.label;
             track.srclang = 'en';
             track.src = sub.file;
-            track.default = index === 0; // First subtitle is best quality, set as default
+            track.default = index === 0;
+
+            // Listen for track load events
+            track.addEventListener('load', () => {
+                console.log(`[Player] ✅ Track loaded: ${sub.label}`);
+                // Enable first track when it loads
+                if (index === 0 && !firstTrackLoaded) {
+                    firstTrackLoaded = true;
+                    setActiveSubtitle(sub.file);
+                    // Find the text track and enable it
+                    for (let i = 0; i < video.textTracks.length; i++) {
+                        if (video.textTracks[i].label === sub.label) {
+                            video.textTracks[i].mode = 'showing';
+                            console.log(`[Player] 🎬 Subtitle enabled: ${sub.label}`);
+                            break;
+                        }
+                    }
+                }
+            });
+
+            track.addEventListener('error', (e) => {
+                console.error(`[Player] ❌ Track load error: ${sub.label}`, e);
+            });
+
             video.appendChild(track);
         });
 
-        // Auto-enable the first (best quality) subtitle
+        // Fallback: If tracks don't load in 2 seconds, try enabling anyway
         setTimeout(() => {
-            // Subtitles are already sorted by quality, use the first one
-            const bestSub = extracted.subtitles![0];
-            if (bestSub) {
-                console.log(`[Player] Auto-selecting best subtitle: ${bestSub.label.substring(0, 50)}...`);
+            if (!firstTrackLoaded && bestSub && video.textTracks.length > 0) {
+                console.log(`[Player] ⚠️ Fallback: enabling first track (may not have loaded)`);
                 setActiveSubtitle(bestSub.file);
-                if (video.textTracks.length > 0) {
-                    video.textTracks[0].mode = 'showing';
-                }
+                video.textTracks[0].mode = 'showing';
             }
             setSubtitlesReady(true);
-        }, 500);
+        }, 2000);
     };
 
     // Watch for subtitle changes (for background loading)
@@ -800,6 +822,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
         >
             <video
                 ref={videoRef}
+                crossOrigin="anonymous"
                 className={`w-full h-full transition-all duration-300 ${isZoomToFill ? 'object-cover' : 'object-contain'}`}
                 style={{ filter: `brightness(${brightness})` }}
                 onClick={togglePlay}

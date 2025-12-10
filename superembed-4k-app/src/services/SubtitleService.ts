@@ -138,12 +138,65 @@ function calculateQualityScore(label: string): number {
 }
 
 /**
- * Fetch and process a single subtitle from Subdl
+ * Fetch and process a single subtitle
+ * Handles both:
+ * - Embedded subtitles (direct VTT URLs from source - perfectly synced)
+ * - Subdl subtitles (ZIP files that need extraction)
  */
 export async function processSubtitle(subtitle: SubdlSubtitle): Promise<ProcessedSubtitle | null> {
     try {
-        console.log(`[SubtitleService] Fetching: ${subtitle.label.substring(0, 50)}...`);
+        console.log(`[SubtitleService] Fetching: ${subtitle.label.substring(0, 50)}... (source: ${subtitle.source || 'unknown'})`);
 
+        // EMBEDDED SUBTITLES: Direct VTT URL from source (perfectly synced!)
+        if (subtitle.source === 'embedded' || subtitle.source === 'network') {
+            // These are direct VTT URLs, no ZIP extraction needed
+            const fileUrl = subtitle.file;
+
+            // Check if it's already a VTT file
+            if (fileUrl.includes('.vtt')) {
+                console.log(`[SubtitleService] 🎯 EMBEDDED subtitle (synced with source): ${fileUrl.substring(0, 60)}...`);
+
+                // Give embedded subtitles highest quality score (they're perfectly synced)
+                const quality = 1000; // Higher than any Subdl subtitle
+
+                // Label to indicate this is the synced subtitle from the source
+                const label = subtitle.label === 'English'
+                    ? 'English • Synced'
+                    : (subtitle.label || 'English (Synced)');
+
+                return {
+                    label,
+                    lang: subtitle.lang || 'en',
+                    vttUrl: fileUrl, // Use the URL directly
+                    originalFile: fileUrl,
+                    quality
+                };
+            }
+
+            // If it's SRT, fetch and convert
+            if (fileUrl.includes('.srt')) {
+                const response = await fetch(fileUrl);
+                if (!response.ok) {
+                    console.warn(`[SubtitleService] Failed to fetch embedded SRT: ${response.status}`);
+                    return null;
+                }
+
+                const srtContent = await response.text();
+                const vttContent = convertSrtToVtt(srtContent);
+                const vttBlob = new Blob([vttContent], { type: 'text/vtt' });
+                const vttUrl = URL.createObjectURL(vttBlob);
+
+                return {
+                    label: subtitle.label || 'English (Synced)',
+                    lang: subtitle.lang || 'en',
+                    vttUrl,
+                    originalFile: fileUrl,
+                    quality: 1000
+                };
+            }
+        }
+
+        // SUBDL SUBTITLES: ZIP files that need extraction
         const response = await fetch(subtitle.file);
         if (!response.ok) {
             console.warn(`[SubtitleService] Failed to fetch (${response.status}): ${subtitle.label.substring(0, 30)}`);

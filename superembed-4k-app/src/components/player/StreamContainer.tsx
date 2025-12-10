@@ -81,7 +81,9 @@ export const StreamContainer: React.FC<StreamContainerProps> = ({
 
                 // 🎬 PROCESS SUBTITLES IN BACKGROUND (non-blocking)
                 if (result.subtitles && result.subtitles.length > 0) {
-                    console.log(`[StreamContainer] 📥 Processing ${result.subtitles.length} subtitles in background...`);
+                    // Check if we have embedded subtitles (perfectly synced from source)
+                    const hasEmbedded = result.subtitles.some((s: any) => s.source === 'embedded');
+                    console.log(`[StreamContainer] 📥 Processing ${result.subtitles.length} subtitles in background... (embedded: ${hasEmbedded})`);
 
                     // Process subtitles asynchronously - don't await!
                     processSubtitles(result.subtitles)
@@ -89,14 +91,17 @@ export const StreamContainer: React.FC<StreamContainerProps> = ({
                             if (!componentMounted.current) return;
 
                             // Convert to subtitle tracks format
-                            const subtitleTracks = processedSubtitles.map(sub => ({
+                            // First subtitle is best quality (embedded has score 1000, always first)
+                            const subtitleTracks = processedSubtitles.map((sub, index) => ({
                                 label: sub.label,
                                 lang: sub.lang,
                                 file: sub.vttUrl,
-                                default: false
+                                default: index === 0 // First = best quality = default
                             }));
 
-                            console.log(`[StreamContainer] ✅ ${subtitleTracks.length} subtitles ready - updating player`);
+                            if (subtitleTracks.length > 0) {
+                                console.log(`[StreamContainer] ✅ ${subtitleTracks.length} subtitles ready - best: "${subtitleTracks[0].label}" (default: true)`);
+                            }
 
                             // Update stream with subtitles (player will reactively update)
                             setStream(prev => prev ? {

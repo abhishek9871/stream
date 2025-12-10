@@ -232,8 +232,32 @@ app.get('/api/extract', async (req, res) => {
     // State tracking
     let foundM3U8 = null;
     let foundSubtitles = [];
+    let embeddedSubtitles = []; // Subtitles from PlayerJS config
     let capturedReferer = null;
     let playerIframeFound = false;
+
+    // Helper: Parse PlayerJS subtitle config format: [Lang]url,[Lang]url,...
+    const parseSubtitleConfig = (subtitleStr) => {
+        const results = [];
+        // Match pattern: [Language]URL
+        const regex = /\[([^\]]+)\](https?:\/\/[^\s,\[\]]+\.vtt)/g;
+        let match;
+        while ((match = regex.exec(subtitleStr)) !== null) {
+            const lang = match[1].trim();
+            const url = match[2].trim();
+            // Only keep English subtitles
+            if (lang.toLowerCase().includes('english') || lang.toLowerCase() === 'en') {
+                results.push({
+                    label: lang,
+                    lang: 'en',
+                    file: url,
+                    source: 'embedded'
+                });
+                console.log(`[Sub] 🎯 Embedded English: ${url.substring(0, 60)}...`);
+            }
+        }
+        return results;
+    };
 
     // Network Response Handler
     const responseHandler = async (response) => {
@@ -254,17 +278,50 @@ app.get('/api/extract', async (req, res) => {
             }
         }
 
-        // Track player iframe loading
+        // Track player iframe loading AND extract subtitle config from vfx.php
         if (url.includes('vipstream') || url.includes('vfx.php')) {
             console.log(`[Player] 🎬 Player iframe detected: ${url.substring(0, 80)}...`);
             playerIframeFound = true;
+
+            // Try to extract subtitle config from the response body
+            try {
+                const contentType = response.headers()['content-type'] || '';
+                if (contentType.includes('text/html') || contentType.includes('application/javascript')) {
+                    const body = await response.text();
+
+                    // Look for PlayerJS subtitle config: "subtitle":"[English]url,[Dutch]url,..."
+                    const subtitleMatch = body.match(/"subtitle"\s*:\s*"([^"]+)"/);
+                    if (subtitleMatch && subtitleMatch[1]) {
+                        const subtitleConfig = subtitleMatch[1];
+                        console.log(`[Sub] 📜 Found subtitle config in vfx.php (${subtitleConfig.length} chars)`);
+
+                        const parsed = parseSubtitleConfig(subtitleConfig);
+                        if (parsed.length > 0) {
+                            embeddedSubtitles.push(...parsed);
+                            console.log(`[Sub] ✅ Extracted ${parsed.length} embedded English subtitle(s)`);
+                        }
+                    }
+
+                    // Also try alternative pattern: subtitle: "[English]url,..."
+                    const altMatch = body.match(/subtitle\s*:\s*"([^"]+)"/);
+                    if (altMatch && altMatch[1] && embeddedSubtitles.length === 0) {
+                        const parsed = parseSubtitleConfig(altMatch[1]);
+                        if (parsed.length > 0) {
+                            embeddedSubtitles.push(...parsed);
+                            console.log(`[Sub] ✅ Extracted ${parsed.length} embedded English subtitle(s) (alt pattern)`);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.log(`[Sub] ⚠️ Could not read vfx.php body: ${e.message}`);
+            }
         }
 
-        // 📜 Capture Subtitles
+        // 📜 Capture direct VTT/SRT URLs from network requests
         if ((url.includes('.vtt') || url.includes('.srt')) && !url.includes('blob:')) {
             if (!foundSubtitles.some(s => s.file === url)) {
-                console.log(`[Sub] Found: ${url.substring(0, 80)}...`);
-                foundSubtitles.push({ label: 'English', file: url });
+                console.log(`[Sub] Found direct: ${url.substring(0, 80)}...`);
+                foundSubtitles.push({ label: 'English', lang: 'en', file: url, source: 'network' });
             }
         }
     };
@@ -1136,14 +1193,39 @@ app.get('/api/extract', async (req, res) => {
         const proxyBase = `http://${req.get('host')}`;
         const proxiedM3U8 = `${proxyBase}/api/proxy/m3u8?url=${encodeURIComponent(foundM3U8)}&referer=${encodeURIComponent(referer)}`;
 
-        // Fetch subtitles from Subdl API (much more reliable than scraping)
-        console.log('[Result] Fetching subtitles from Subdl API...');
-        const subdlSubtitles = await fetchSubtitlesFromSubdl(
-            tmdbId,
-            type,
-            type === 'tv' ? season : null,
-            type === 'tv' ? episode : null
-        );
+        // PRIORITY: Use embedded subtitles from source (perfectly synced)
+        // Fall back to Subdl API only if no embedded found
+        let finalSubtitles = [];
+
+        // 1. Check embedded subtitles (from PlayerJS config - best quality, synced)
+        if (embeddedSubtitles.length > 0) {
+            console.log(`[Result] 🎯 Using ${embeddedSubtitles.length} EMBEDDED subtitle(s) from source (perfectly synced)`);
+            // Proxy embedded subtitle URLs to avoid CORS issues
+            finalSubtitles = embeddedSubtitles.map(sub => ({
+                ...sub,
+                file: `${proxyBase}/api/proxy/segment?url=${encodeURIComponent(sub.file)}&referer=${encodeURIComponent(referer)}`
+            }));
+        }
+        // 2. Check direct network subtitles
+        else if (foundSubtitles.length > 0) {
+            console.log(`[Result] 📡 Using ${foundSubtitles.length} subtitle(s) from network requests`);
+            // Proxy network subtitle URLs to avoid CORS issues
+            finalSubtitles = foundSubtitles.map(sub => ({
+                ...sub,
+                file: `${proxyBase}/api/proxy/segment?url=${encodeURIComponent(sub.file)}&referer=${encodeURIComponent(referer)}`
+            }));
+        }
+        // 3. Fall back to Subdl API
+        else {
+            console.log('[Result] 📥 No embedded subtitles found, fetching from Subdl API...');
+            const subdlSubtitles = await fetchSubtitlesFromSubdl(
+                tmdbId,
+                type,
+                type === 'tv' ? season : null,
+                type === 'tv' ? episode : null
+            );
+            finalSubtitles = subdlSubtitles;
+        }
 
         // Release extraction lock
         isExtracting = false;
@@ -1152,7 +1234,7 @@ app.get('/api/extract', async (req, res) => {
             success: true,
             m3u8Url: foundM3U8,
             proxiedM3U8Url: proxiedM3U8,
-            subtitles: subdlSubtitles, // Subtitles from Subdl API
+            subtitles: finalSubtitles,
             referer: referer,
             provider: 'vipstream-s'
         });
