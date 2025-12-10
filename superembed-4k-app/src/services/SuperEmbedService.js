@@ -7,7 +7,7 @@ const SCRAPER_API_URL = process.env.NEXT_PUBLIC_SCRAPER_URL || 'http://localhost
 class SuperEmbedService {
   /**
    * Extract M3U8 stream from the scraper backend
-   * @param {string} imdbId - IMDB ID (e.g., 'tt0068646')
+   * @param {string|null|undefined} imdbId - IMDB ID (e.g., 'tt0068646')
    * @param {string|number} tmdbId - TMDB ID (e.g., 238)
    * @param {string} type - 'movie' or 'tv'
    * @param {number} season - Season number (for TV)
