@@ -381,19 +381,61 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                 hls.attachMedia(video);
 
                 hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+                    console.log('[HLS] Manifest parsed, levels:', data.levels.length);
+
+                    // Parse quality levels with better resolution detection
                     const qualityList = data.levels
-                        .map((level, index) => ({
-                            index,
-                            height: level.height || 0,
-                            label: level.height ? `${level.height}p` : `Level ${index}`
-                        }))
+                        .map((level, index) => {
+                            let height = level.height || 0;
+                            let label = '';
+
+                            // If no height, try to infer from bitrate or name
+                            if (!height && level.bitrate) {
+                                // Common bitrate-to-resolution mappings
+                                if (level.bitrate >= 12000000) height = 2160; // 4K
+                                else if (level.bitrate >= 8000000) height = 1440; // 2K
+                                else if (level.bitrate >= 4000000) height = 1080;
+                                else if (level.bitrate >= 2500000) height = 720;
+                                else if (level.bitrate >= 1000000) height = 480;
+                                else height = 360;
+                            }
+
+                            // If still no height, try to get from URL
+                            if (!height && level.url && level.url[0]) {
+                                const urlStr = level.url[0].toLowerCase();
+                                if (urlStr.includes('2160') || urlStr.includes('4k')) height = 2160;
+                                else if (urlStr.includes('1440') || urlStr.includes('2k')) height = 1440;
+                                else if (urlStr.includes('1080')) height = 1080;
+                                else if (urlStr.includes('720')) height = 720;
+                                else if (urlStr.includes('480')) height = 480;
+                                else if (urlStr.includes('360')) height = 360;
+                            }
+
+                            // Create label based on height
+                            if (height >= 2160) label = '4K';
+                            else if (height >= 1440) label = '2K';
+                            else if (height >= 1080) label = '1080p';
+                            else if (height >= 720) label = '720p';
+                            else if (height >= 480) label = '480p';
+                            else if (height >= 360) label = '360p';
+                            else label = height > 0 ? `${height}p` : `Quality ${index + 1}`;
+
+                            console.log(`[HLS] Level ${index}: ${label} (${level.bitrate || 'unknown'} bps, ${level.height || 'no height'})`);
+
+                            return { index, height, label };
+                        })
                         .sort((a, b) => b.height - a.height);
 
                     setQualities(qualityList);
 
+                    // Force highest quality level by default (not Auto)
                     if (qualityList.length > 0) {
-                        hls.startLevel = qualityList[0].index;
-                        setQuality(qualityList[0].index);
+                        const highestQuality = qualityList[0];
+                        console.log(`[HLS] Setting default quality to: ${highestQuality.label} (level ${highestQuality.index})`);
+                        hls.currentLevel = highestQuality.index; // Force current level
+                        hls.startLevel = highestQuality.index; // Set start level
+                        hls.loadLevel = highestQuality.index; // Force load level
+                        setQuality(highestQuality.index);
                     } else {
                         setQuality(-1);
                     }
