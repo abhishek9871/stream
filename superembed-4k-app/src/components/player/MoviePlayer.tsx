@@ -376,6 +376,14 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                 const hls = new Hls({
                     enableWorker: true,
                     lowLatencyMode: false,
+                    // 🚀 FAST STARTUP optimizations
+                    maxBufferLength: 30,           // Buffer up to 30s
+                    maxMaxBufferLength: 60,        // Max buffer 60s
+                    maxBufferSize: 60 * 1000000,   // 60MB max buffer
+                    maxBufferHole: 0.5,            // Allow small gaps
+                    startFragPrefetch: true,       // Prefetch first fragment immediately
+                    testBandwidth: false,          // Skip bandwidth test - use startLevel
+                    abrEwmaDefaultEstimate: 5000000, // Assume 5Mbps initially for faster start
                 });
 
                 hls.attachMedia(video);
@@ -570,7 +578,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
             video.appendChild(track);
         });
 
-        // Fallback: If tracks don't load in 2 seconds, try enabling anyway
+        // Fallback: If tracks don't load in 500ms, try enabling anyway (reduced from 2000ms)
         setTimeout(() => {
             if (!firstTrackLoaded && bestSub && video.textTracks.length > 0) {
                 console.log(`[Player] ⚠️ Fallback: enabling first track (may not have loaded)`);
@@ -578,7 +586,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                 video.textTracks[0].mode = 'showing';
             }
             setSubtitlesReady(true);
-        }, 2000);
+        }, 500);
     };
 
     // Watch for subtitle changes (for background loading)

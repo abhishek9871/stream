@@ -38,14 +38,12 @@ export const StreamContainer: React.FC<StreamContainerProps> = ({
     useEffect(() => {
         componentMounted.current = true;
 
-        // Small delay to prevent strict mode double-firing from being an issue (though Service handles it too)
-        const timer = setTimeout(() => {
-            extract();
-        }, 500);
+        // Start extraction immediately - no delay needed
+        // The backend handles concurrent request protection via isExtracting lock
+        extract();
 
         return () => {
             componentMounted.current = false;
-            clearTimeout(timer);
         };
     }, [tmdbId, imdbId, type, season, episode]);
 

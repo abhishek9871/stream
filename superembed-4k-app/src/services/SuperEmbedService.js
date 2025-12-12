@@ -49,7 +49,7 @@ class SuperEmbedService {
         if (response.status === 429) {
           retryCount++;
           console.log(`[SuperEmbedService] ⏳ Extraction in progress, waiting... (attempt ${retryCount}/${maxRetries})`);
-          await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+          await new Promise(resolve => setTimeout(resolve, 3000)); // Reduced from 5000ms to 3000ms
           continue;
         }
 

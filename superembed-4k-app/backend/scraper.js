@@ -110,6 +110,39 @@ let pageInstance = null;
 let isExtracting = false;
 let lastExtractionId = null;
 
+// ============ CACHE SYSTEM ============
+// Cache M3U8 URLs and subtitles by content ID (reduces repeat requests to instant)
+const streamCache = new Map();
+const CACHE_TTL = 2 * 60 * 60 * 1000; // 2 hours TTL
+
+function getCachedStream(contentId) {
+    const cached = streamCache.get(contentId);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        console.log(`[Cache] ✅ HIT for ${contentId} (age: ${Math.round((Date.now() - cached.timestamp) / 1000)}s)`);
+        return cached.data;
+    }
+    if (cached) {
+        console.log(`[Cache] ⏰ EXPIRED for ${contentId}`);
+        streamCache.delete(contentId);
+    }
+    return null;
+}
+
+function setCachedStream(contentId, data) {
+    streamCache.set(contentId, { data, timestamp: Date.now() });
+    console.log(`[Cache] 💾 Cached ${contentId} (total cached: ${streamCache.size})`);
+
+    // Cleanup old entries if cache gets too big
+    if (streamCache.size > 100) {
+        const now = Date.now();
+        for (const [key, value] of streamCache.entries()) {
+            if (now - value.timestamp > CACHE_TTL) {
+                streamCache.delete(key);
+            }
+        }
+    }
+}
+
 async function getBrowser(forceRestart = false) {
     // If force restart or browser is corrupted, close and relaunch
     if (forceRestart && browserInstance) {
@@ -187,8 +220,15 @@ app.get('/api/extract', async (req, res) => {
         return res.status(400).json({ success: false, error: 'Missing season/episode for TV' });
     }
 
-    const contentId = `${type}-${tmdbId || imdbId}`;
+    const contentId = `${type}-${tmdbId || imdbId}${type === 'tv' ? `-s${season}e${episode}` : ''}`;
     console.log(`\n[Extract] ========== ${contentId} ==========`);
+
+    // 🚀 CHECK CACHE FIRST - instant response if cached
+    const cached = getCachedStream(contentId);
+    if (cached) {
+        console.log('[Extract] ⚡ Returning cached result instantly');
+        return res.json(cached);
+    }
 
     // Check if another extraction is in progress
     if (isExtracting) {
@@ -197,10 +237,10 @@ app.get('/api/extract', async (req, res) => {
     }
 
     isExtracting = true;
-
-    // Force browser restart if switching to different content
-    const needsRestart = lastExtractionId !== null && lastExtractionId !== contentId;
     lastExtractionId = contentId;
+
+    // No more browser restart on content switch - just navigate to new URL
+    const needsRestart = false;
 
     let browser, page;
     try {
@@ -342,7 +382,7 @@ app.get('/api/extract', async (req, res) => {
         await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 60000 });
         console.log(`[Nav] Redirected to: ${page.url()}`);
 
-        await sleep(2000);
+        await sleep(1000); // Reduced from 2000ms
 
         // ========================================
         // STEP 1: Handle Interstitial Ad
@@ -426,7 +466,7 @@ app.get('/api/extract', async (req, res) => {
 
         // Extra cleanup
         await closeAllPopups(browser, mainPage);
-        await sleep(1000);
+        await sleep(500); // Reduced from 1000ms
 
         // ========================================
         // STEP 2: Verify interstitial is gone before clicking play
@@ -625,7 +665,7 @@ app.get('/api/extract', async (req, res) => {
             await page.mouse.click(serversButton.x, serversButton.y);
             console.log('[Server] ✅ Clicked SERVERS button');
 
-            await sleep(2000); // Wait for dropdown to appear
+            await sleep(1500); // Wait for dropdown to appear (reduced from 2000ms)
             await closeAllPopups(browser, mainPage);
 
             // Look for vipstream-S in the dropdown
@@ -686,7 +726,7 @@ app.get('/api/extract', async (req, res) => {
                 console.log('[Server] ✅ Clicked vipstream-S');
 
                 // Wait for page to start loading new server
-                await sleep(4000);
+                await sleep(2500); // Reduced from 4000ms
                 await closeAllPopups(browser, mainPage);
 
                 // Verify we're now loading vipstream and NOT another server
@@ -921,21 +961,21 @@ app.get('/api/extract', async (req, res) => {
         }
 
         // ========================================
-        // STEP 4: Wait for M3U8
+        // STEP 4: Wait for M3U8 (optimized - reduced from 30 to 20 max)
         // ========================================
         console.log('[Step 4] Waiting for M3U8...');
 
-        for (let i = 0; i < 30; i++) {
-            await sleep(1000);
+        for (let i = 0; i < 20; i++) {
+            await sleep(800); // Reduced from 1000ms
 
             if (foundM3U8) {
-                console.log(`[M3U8] ✅ Captured after ${i + 1} seconds`);
+                console.log(`[M3U8] ✅ Captured after ${Math.round((i + 1) * 0.8)} seconds`);
                 break;
             }
 
-            // Every 5 seconds, retry some actions
-            if (i % 5 === 0 && i > 0) {
-                console.log(`[Wait] ${i}s - Retrying...`);
+            // Every 4 iterations (~3 seconds), retry some actions
+            if (i % 4 === 0 && i > 0) {
+                console.log(`[Wait] ${Math.round(i * 0.8)}s - Retrying...`);
                 await closeAllPopups(browser, mainPage);
 
                 // Try clicking in player frames
@@ -953,212 +993,10 @@ app.get('/api/extract', async (req, res) => {
         }
 
         // ========================================
-        // STEP 5: Extract English Subtitles
+        // STEP 5: REMOVED - Subtitles are now captured from vfx.php network response
+        // This was redundant and added 20-30 seconds of unnecessary waiting
+        // Embedded subtitles are extracted automatically in the responseHandler
         // ========================================
-        if (foundM3U8) {
-            console.log('[Step 5] Extracting English subtitles...');
-            try {
-                // IMPORTANT: Wait for interstitial ad to fully load after M3U8 capture
-                console.log('[Subtitles] Step 5.1: Waiting for interstitial to load...');
-                await sleep(5000); // Give 5 seconds for interstitial to appear
-                await closeAllPopups(browser, mainPage);
-
-                // Handle interstitial ad with proper mouse clicking
-                console.log('[Subtitles] Step 5.2: Checking for interstitial ads...');
-
-                for (let attempt = 0; attempt < 15; attempt++) {
-                    await closeAllPopups(browser, mainPage);
-
-                    // Check page state and find Skip ad button position
-                    const adState = await page.evaluate(() => {
-                        const bodyText = document.body?.innerText || '';
-
-                        // Check if interstitial is present
-                        const hasInterstitial = bodyText.includes('Access Content') ||
-                            bodyText.includes('Play Now') ||
-                            bodyText.includes('Skip ad');
-
-                        if (!hasInterstitial) {
-                            return { hasInterstitial: false, skipPos: null };
-                        }
-
-                        // Find Skip ad button position
-                        const allElements = document.querySelectorAll('*');
-                        for (const el of allElements) {
-                            const text = (el.textContent || '').trim().toLowerCase();
-                            if (text === 'skip ad' || text === 'skip') {
-                                const rect = el.getBoundingClientRect();
-                                if (rect.width > 0 && rect.height > 0 && rect.x > 0) {
-                                    return {
-                                        hasInterstitial: true,
-                                        skipPos: { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
-                                    };
-                                }
-                            }
-                        }
-
-                        return { hasInterstitial: true, skipPos: null };
-                    });
-
-                    if (!adState.hasInterstitial) {
-                        console.log('[Subtitles] ✅ No interstitial blocking - ready for settings');
-                        break;
-                    }
-
-                    if (adState.skipPos) {
-                        console.log(`[Subtitles] Found Skip Ad at (${Math.round(adState.skipPos.x)}, ${Math.round(adState.skipPos.y)})`);
-
-                        // Use mouse movement and click (more reliable than DOM click)
-                        await page.mouse.move(adState.skipPos.x, adState.skipPos.y, { steps: 10 });
-                        await sleep(500);
-                        await page.mouse.click(adState.skipPos.x, adState.skipPos.y);
-                        console.log('[Subtitles] ✅ Clicked Skip Ad');
-
-                        await sleep(3000);
-                        await closeAllPopups(browser, mainPage);
-                        break; // Ad should be gone now
-                    } else {
-                        console.log(`[Subtitles] Interstitial present, waiting for Skip button... (${attempt + 1}/15)`);
-                    }
-
-                    await sleep(1000);
-                }
-
-                await sleep(2000);
-                await closeAllPopups(browser, mainPage);
-
-                // Find the vipstream iframe
-                console.log('[Subtitles] Step 5.2: Finding player iframe...');
-                let targetFrame = null;
-                for (const frame of page.frames()) {
-                    const frameUrl = frame.url();
-                    if (frameUrl.includes('vipstream') || frameUrl.includes('vfx.php')) {
-                        targetFrame = frame;
-                        console.log(`[Subtitles] Found iframe: ${frameUrl.substring(0, 60)}...`);
-                        break;
-                    }
-                }
-
-                if (targetFrame) {
-                    // Move mouse to show controls
-                    await page.mouse.move(640, 400);
-                    await sleep(500);
-
-                    // Click Settings button (gear icon) - try on iframe first
-                    console.log('[Subtitles] Step 5.3: Clicking settings button...');
-                    const settingsClicked = await targetFrame.evaluate(() => {
-                        // Common player settings button selectors
-                        const selectors = [
-                            '.pljssettings',
-                            '.plyr__control[data-plyr="settings"]',
-                            '[class*="settings"]',
-                            '.jw-icon-settings',
-                            '.vjs-settings-button',
-                            'button[aria-label="Settings"]',
-                            '[class*="gear"]',
-                            '[class*="cog"]'
-                        ];
-
-                        for (const sel of selectors) {
-                            const el = document.querySelector(sel);
-                            if (el) {
-                                el.click();
-                                return { success: true, selector: sel };
-                            }
-                        }
-
-                        // Look for settings icon by SVG or icon
-                        const allClickables = document.querySelectorAll('button, div[role="button"], [class*="btn"], svg');
-                        for (const el of allClickables) {
-                            const className = el.className?.toString() || '';
-                            const parent = el.parentElement;
-                            const parentClass = parent?.className?.toString() || '';
-
-                            if (className.includes('setting') || className.includes('gear') ||
-                                parentClass.includes('setting') || parentClass.includes('gear')) {
-                                el.click();
-                                return { success: true, selector: 'icon-match' };
-                            }
-                        }
-
-                        return { success: false };
-                    });
-
-                    if (settingsClicked.success) {
-                        console.log(`[Subtitles] ✅ Settings opened via: ${settingsClicked.selector}`);
-                        await sleep(1500);
-
-                        // Click on Subtitle option
-                        console.log('[Subtitles] Step 5.4: Opening subtitle menu...');
-                        const subtitleMenuClicked = await targetFrame.evaluate(() => {
-                            // Look for subtitle text in menu items
-                            const allItems = document.querySelectorAll('div, span, li, a, button');
-                            for (const item of allItems) {
-                                const text = (item.textContent || '').toLowerCase().trim();
-                                const isClickable = item.closest('[class*="menu"]') ||
-                                    item.closest('[class*="settings"]') ||
-                                    item.closest('[class*="dropdown"]');
-
-                                if (isClickable && (text === 'subtitle' || text === 'subtitles' || text.startsWith('subtitle'))) {
-                                    item.click();
-                                    return true;
-                                }
-                            }
-                            return false;
-                        });
-
-                        if (subtitleMenuClicked) {
-                            console.log('[Subtitles] ✅ Subtitle menu opened');
-                            await sleep(1500);
-
-                            // Extract English subtitles from the list
-                            console.log('[Subtitles] Step 5.5: Extracting English subtitles...');
-                            const englishSubs = await targetFrame.evaluate(() => {
-                                const subtitles = [];
-                                const seen = new Set();
-
-                                // Get all text items that could be subtitle options
-                                const items = document.querySelectorAll('div, span, li');
-
-                                for (const item of items) {
-                                    const text = (item.textContent || '').trim();
-                                    const textLower = text.toLowerCase();
-
-                                    // Match English variants
-                                    if (textLower.includes('english') && !seen.has(text) && text.length < 50) {
-                                        // Check if this looks like a subtitle option (not a header)
-                                        if (!textLower.includes('quality') && !textLower.includes('speed')) {
-                                            subtitles.push({ label: text, lang: 'en' });
-                                            seen.add(text);
-                                        }
-                                    }
-                                }
-                                return subtitles;
-                            });
-
-                            if (englishSubs.length > 0) {
-                                console.log(`[Subtitles] ✅ Found ${englishSubs.length} English subtitle(s):`);
-                                englishSubs.forEach(s => console.log(`   - ${s.label}`));
-                                foundSubtitles = englishSubs;
-                            } else {
-                                console.log('[Subtitles] ⚠️ No English subtitles found');
-                            }
-
-                            // Close menu
-                            await targetFrame.evaluate(() => document.body.click());
-                        } else {
-                            console.log('[Subtitles] ⚠️ Could not find Subtitle option in menu');
-                        }
-                    } else {
-                        console.log('[Subtitles] ⚠️ Could not find Settings button');
-                    }
-                } else {
-                    console.log('[Subtitles] ⚠️ Could not find vipstream iframe');
-                }
-            } catch (subError) {
-                console.log('[Subtitles] ⚠️ Error:', subError.message);
-            }
-        }
 
     } catch (e) {
         console.error('[Extract] Error:', e.message);
@@ -1230,14 +1068,20 @@ app.get('/api/extract', async (req, res) => {
         // Release extraction lock
         isExtracting = false;
 
-        res.json({
+        // Build response
+        const responseData = {
             success: true,
             m3u8Url: foundM3U8,
             proxiedM3U8Url: proxiedM3U8,
             subtitles: finalSubtitles,
             referer: referer,
             provider: 'vipstream-s'
-        });
+        };
+
+        // 💾 CACHE the successful result for instant future requests
+        setCachedStream(contentId, responseData);
+
+        res.json(responseData);
     } else {
         console.log('[Result] ❌ FAILED - No M3U8 found');
         // Release extraction lock
@@ -1341,7 +1185,31 @@ app.get('/api/proxy/segment', async (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', uptime: process.uptime(), browser: browserInstance ? 'running' : 'not started' });
+    res.json({
+        status: 'ok',
+        uptime: process.uptime(),
+        browser: browserInstance ? 'running' : 'not started',
+        cache: {
+            size: streamCache.size,
+            entries: Array.from(streamCache.keys())
+        },
+        extracting: isExtracting
+    });
+});
+
+// Cache management endpoint
+app.get('/api/cache/clear', (req, res) => {
+    const { id } = req.query;
+    if (id) {
+        const deleted = streamCache.delete(id);
+        console.log(`[Cache] ${deleted ? '🗑️ Cleared' : '⚠️ Not found'}: ${id}`);
+        res.json({ success: deleted, message: deleted ? `Cleared cache for ${id}` : `No cache found for ${id}` });
+    } else {
+        const count = streamCache.size;
+        streamCache.clear();
+        console.log(`[Cache] 🗑️ Cleared ALL ${count} entries`);
+        res.json({ success: true, message: `Cleared ${count} cached entries` });
+    }
 });
 
 process.on('SIGINT', async () => {
@@ -1350,8 +1218,22 @@ process.on('SIGINT', async () => {
     process.exit(0);
 });
 
+// 🚀 PRE-WARM BROWSER on startup for faster first request
+async function prewarmBrowser() {
+    console.log('[Prewarm] 🔥 Starting browser pre-warm...');
+    try {
+        const { browser, page } = await getBrowser(false);
+        console.log('[Prewarm] ✅ Browser ready! First request will be faster.');
+    } catch (e) {
+        console.log('[Prewarm] ⚠️ Browser pre-warm failed:', e.message);
+    }
+}
+
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n🎬 SuperEmbed VIP Stream Scraper on port ${PORT}`);
     console.log(`📡 http://localhost:${PORT}/api/extract?tmdbId=238&type=movie`);
     console.log(`📡 http://localhost:${PORT}/api/extract?tmdbId=1399&type=tv&season=1&episode=1\n`);
+
+    // Pre-warm browser after server starts (non-blocking)
+    prewarmBrowser();
 });
