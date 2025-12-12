@@ -164,7 +164,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
     const [isZoomToFill, setIsZoomToFill] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [gestureIndicator, setGestureIndicator] = useState<{
-        type: 'volume' | 'brightness' | 'seek-forward' | 'seek-backward' | 'zoom';
+        type: 'volume' | 'brightness' | 'seek-forward' | 'seek-backward' | 'zoom' | 'enhance';
         value: number | string;
     } | null>(null);
     const touchStartRef = useRef<{ x: number; y: number; time: number; initialVolume: number; initialBrightness: number } | null>(null);
@@ -518,39 +518,82 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
         };
     }, [extracted.m3u8Url]);
 
+
     useEffect(() => {
-        if (!enhancementSupported || !enhancedCanvasRef.current) return;
-
-        const enhancer = new VideoEnhancer();
-        const initialized = enhancer.initialize(enhancedCanvasRef.current);
-
-        if (initialized) {
-            enhancerRef.current = enhancer;
-        }
-
+        // Cleanup function only
         return () => {
             if (enhancerRef.current) {
                 enhancerRef.current.destroy();
                 enhancerRef.current = null;
             }
         };
-    }, [enhancementSupported]);
+    }, []);
 
     useEffect(() => {
-        if (!enhancerRef.current || !videoRef.current) return;
+        if (!videoRef.current || !enhancedCanvasRef.current) return;
+        if (!enhancementSupported) return;
 
-        if (enhancementEnabled && isPlaying) {
-            enhancerRef.current.start(videoRef.current);
-        } else {
-            enhancerRef.current.stop();
+        const video = videoRef.current;
+        const canvas = enhancedCanvasRef.current;
+
+        // Lazy initialize enhancer when first enabled
+        if (enhancementEnabled && !enhancerRef.current) {
+            try {
+                const enhancer = new VideoEnhancer();
+                const initialized = enhancer.initialize(canvas);
+                if (initialized) {
+                    enhancerRef.current = enhancer;
+                    console.log('[MoviePlayer] VideoEnhancer initialized');
+                } else {
+                    console.warn('[MoviePlayer] VideoEnhancer failed to initialize');
+                    return;
+                }
+            } catch (err) {
+                console.error('[MoviePlayer] VideoEnhancer error:', err);
+                return;
+            }
         }
-    }, [enhancementEnabled, isPlaying]);
+
+        const enhancer = enhancerRef.current;
+        if (!enhancer) return;
+
+        if (enhancementEnabled) {
+            if (isPlaying) {
+                enhancer.start(video);
+            } else {
+                enhancer.stop();
+                enhancer.renderFrame(video);
+            }
+        } else {
+            enhancer.stop();
+        }
+
+        // Add listeners for seeking/pausing to manually render frames
+        const handleManualRender = () => {
+            if (enhancementEnabled && enhancerRef.current) {
+                enhancerRef.current.renderFrame(video);
+            }
+        };
+
+        video.addEventListener('seeked', handleManualRender);
+        video.addEventListener('pause', handleManualRender);
+
+        return () => {
+            video.removeEventListener('seeked', handleManualRender);
+            video.removeEventListener('pause', handleManualRender);
+        };
+    }, [enhancementEnabled, isPlaying, enhancementSupported]);
 
     const toggleEnhancement = useCallback(() => {
         const newValue = !enhancementEnabled;
         setEnhancementEnabled(newValue);
         localStorage.setItem('videoEnhancement', String(newValue));
-    }, [enhancementEnabled]);
+        // Show visual feedback
+        showGestureIndicatorWithTimeout({
+            type: 'enhance',
+            value: newValue ? 'ON' : 'OFF'
+        });
+    }, [enhancementEnabled, showGestureIndicatorWithTimeout]);
 
     const addSubtitleTracks = (video: HTMLVideoElement) => {
         if (!extracted.subtitles || extracted.subtitles.length === 0) {
@@ -857,7 +900,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
             <video
                 ref={videoRef}
                 crossOrigin="anonymous"
-                className={`w-full h-full transition-all duration-300 ${isZoomToFill ? 'object-cover' : 'object-contain'}`}
+                className={`w-full h-full transition-all duration-300 ${isZoomToFill ? 'object-cover' : 'object-contain'} ${enhancementEnabled ? 'opacity-0' : 'opacity-100'}`}
                 style={{ filter: `brightness(${brightness})` }}
                 onClick={togglePlay}
                 onTimeUpdate={handleTimeUpdate}
@@ -877,10 +920,12 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                 }}
             />
 
+            {/* Enhanced Video Canvas - WebGL Dolby Vision-like processing */}
             {enhancementSupported && (
                 <canvas
                     ref={enhancedCanvasRef}
-                    className={`absolute inset-0 w-full h-full transition-opacity duration-300 pointer-events-none ${enhancementEnabled && isPlaying ? 'opacity-100' : 'opacity-0'} ${isZoomToFill ? 'object-cover' : 'object-contain'}`}
+                    onClick={togglePlay}
+                    className={`absolute inset-0 w-full h-full transition-opacity duration-300 ${enhancementEnabled ? 'opacity-100 cursor-pointer' : 'opacity-0 pointer-events-none'} ${isZoomToFill ? 'object-cover' : 'object-contain'}`}
                     style={{ filter: `brightness(${brightness})` }}
                 />
             )}
@@ -942,6 +987,19 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                                 </span>
                                 <span className="text-white text-sm font-medium">{gestureIndicator.value}</span>
                             </>
+                        )}
+                        {gestureIndicator.type === 'enhance' && (
+                            <div className="text-center">
+                                <div className={`inline-flex items-center justify-center w-16 h-16 rounded-full mb-2 ${gestureIndicator.value === 'ON'
+                                    ? 'bg-gradient-to-br from-purple-600 to-pink-500'
+                                    : 'bg-white/20'
+                                    }`}>
+                                    <span className="material-symbols-outlined text-white text-3xl">auto_fix_high</span>
+                                </div>
+                                <div className="text-white text-xs font-bold tracking-wider">DOLBY VISION</div>
+                                <div className={`text-sm font-bold mt-1 ${gestureIndicator.value === 'ON' ? 'text-purple-400' : 'text-white/60'
+                                    }`}>{gestureIndicator.value}</div>
+                            </div>
                         )}
                     </div>
                 </div>
@@ -1070,13 +1128,20 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                         </div>
 
                         <div className="flex items-center gap-2 relative">
+                            {/* Dolby Vision-style Enhancement Toggle */}
                             {enhancementSupported && (
                                 <button
                                     onClick={toggleEnhancement}
-                                    className={`p-1 md:p-2 transition-colors ${enhancementEnabled ? 'text-accent-primary' : 'text-white/80 hover:text-white'}`}
-                                    title={enhancementEnabled ? 'Video Enhancement ON' : 'Video Enhancement OFF'}
+                                    className={`flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 rounded-md transition-all duration-300 ${enhancementEnabled
+                                        ? 'bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-lg shadow-purple-500/30'
+                                        : 'text-white/60 hover:text-white hover:bg-white/10'
+                                        }`}
+                                    title={enhancementEnabled ? 'Dolby Vision Enhancement ON - Click to disable' : 'Enable Dolby Vision-like Enhancement'}
                                 >
-                                    <span className="material-symbols-outlined text-xl md:text-2xl">auto_fix_high</span>
+                                    <span className="material-symbols-outlined text-lg md:text-xl">auto_fix_high</span>
+                                    <span className={`text-xs font-bold tracking-wide ${enhancementEnabled ? '' : 'hidden md:inline'}`}>
+                                        {enhancementEnabled ? 'DV' : 'Enhance'}
+                                    </span>
                                 </button>
                             )}
 
