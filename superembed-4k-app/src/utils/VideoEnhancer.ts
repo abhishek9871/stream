@@ -41,8 +41,15 @@ float getLuminance(vec3 c) {
     return dot(c, vec3(0.2126, 0.7152, 0.0722));
 }
 
-// Sharpening effect
+// Sharpening effect with strong shadow protection
 vec3 applySharpen(vec3 color, vec2 uv) {
+    float lum = getLuminance(color);
+    
+    // Skip sharpening entirely in dark areas (below 35% brightness)
+    if (lum < 0.35) {
+        return color;
+    }
+    
     vec2 texel = 1.0 / u_resolution;
     
     vec3 top = texture2D(u_image, uv + vec2(0.0, -texel.y)).rgb;
@@ -51,13 +58,26 @@ vec3 applySharpen(vec3 color, vec2 uv) {
     vec3 right = texture2D(u_image, uv + vec2(texel.x, 0.0)).rgb;
     
     vec3 blur = (top + bottom + left + right) * 0.25;
-    vec3 sharp = color + (color - blur) * u_sharpness;
+    vec3 highPass = color - blur;
     
-    return sharp;
+    // Clamp high-pass to prevent extreme values from compression artifacts
+    highPass = clamp(highPass, -0.1, 0.1);
+    
+    // Gradual fade from 35% to 50% brightness
+    float shadowMask = smoothstep(0.35, 0.5, lum);
+    
+    return color + highPass * u_sharpness * shadowMask;
 }
 
-// Clarity (local contrast)
+// Clarity (local contrast) with strong shadow protection
 vec3 applyClarity(vec3 color, vec2 uv) {
+    float lum = getLuminance(color);
+    
+    // Skip clarity entirely in dark areas
+    if (lum < 0.35) {
+        return color;
+    }
+    
     vec2 texel = 2.0 / u_resolution;
     
     vec3 s1 = texture2D(u_image, uv + vec2(texel.x, texel.y)).rgb;
@@ -68,12 +88,23 @@ vec3 applyClarity(vec3 color, vec2 uv) {
     vec3 blur = (s1 + s2 + s3 + s4) * 0.25;
     vec3 diff = color - blur;
     
-    return color + diff * u_clarity * 0.5;
+    // Clamp diff to prevent artifacts
+    diff = clamp(diff, -0.08, 0.08);
+    
+    float shadowMask = smoothstep(0.35, 0.5, lum);
+    
+    return color + diff * u_clarity * 0.5 * shadowMask;
 }
 
-// Vibrance (smart saturation)
+// Vibrance (smart saturation) with shadow protection
 vec3 applyVibrance(vec3 color, float amount) {
     float lum = getLuminance(color);
+    
+    // Reduce vibrance in shadows to avoid amplifying color noise
+    if (lum < 0.2) {
+        return color;
+    }
+    
     float maxC = max(color.r, max(color.g, color.b));
     float minC = min(color.r, min(color.g, color.b));
     float sat = (maxC - minC) / (maxC + 0.001);
@@ -81,7 +112,10 @@ vec3 applyVibrance(vec3 color, float amount) {
     // Less boost for already saturated colors
     float vibranceAmount = amount * (1.0 - sat) * 0.5;
     
-    return mix(vec3(lum), color, 1.0 + vibranceAmount);
+    // Shadow fade
+    float shadowMask = smoothstep(0.2, 0.4, lum);
+    
+    return mix(vec3(lum), color, 1.0 + vibranceAmount * shadowMask);
 }
 
 // Contrast adjustment
@@ -93,12 +127,12 @@ void main() {
     vec4 texColor = texture2D(u_image, v_texCoord);
     vec3 color = texColor.rgb;
     
-    // 1. Sharpening
+    // 1. Sharpening (only in bright areas)
     if (u_sharpness > 0.0) {
         color = applySharpen(color, v_texCoord);
     }
     
-    // 2. Clarity
+    // 2. Clarity (only in bright areas)
     if (u_clarity > 0.0) {
         color = applyClarity(color, v_texCoord);
     }
@@ -106,15 +140,16 @@ void main() {
     // 3. Contrast & Brightness
     color = applyContrast(color, u_contrast, u_brightness);
     
-    // 4. Vibrance
+    // 4. Vibrance (reduced in shadows)
     if (u_vibrance > 0.0) {
         color = applyVibrance(color, u_vibrance);
     }
     
-    // 5. Saturation
+    // 5. Saturation (with shadow protection)
     if (u_saturation != 0.0) {
         float lum = getLuminance(color);
-        color = mix(vec3(lum), color, 1.0 + u_saturation);
+        float shadowMask = smoothstep(0.15, 0.35, lum);
+        color = mix(vec3(lum), color, 1.0 + u_saturation * shadowMask);
     }
     
     // Clamp output
