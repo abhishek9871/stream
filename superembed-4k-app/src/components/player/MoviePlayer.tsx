@@ -109,6 +109,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
         }
         return false;
     });
+    const [enhancerReady, setEnhancerReady] = useState(false);
     const enhancerRef = useRef<VideoEnhancer | null>(null);
     const enhancedCanvasRef = useRef<HTMLCanvasElement>(null);
     const [enhancementSupported] = useState(() => VideoEnhancer.isSupported());
@@ -526,6 +527,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                 enhancerRef.current.destroy();
                 enhancerRef.current = null;
             }
+            setEnhancerReady(false);
         };
     }, []);
 
@@ -543,13 +545,20 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                 const initialized = enhancer.initialize(canvas);
                 if (initialized) {
                     enhancerRef.current = enhancer;
+                    setEnhancerReady(true);
                     console.log('[MoviePlayer] VideoEnhancer initialized');
                 } else {
-                    console.warn('[MoviePlayer] VideoEnhancer failed to initialize');
+                    console.warn('[MoviePlayer] VideoEnhancer failed to initialize, disabling enhancement');
+                    setEnhancerReady(false);
+                    setEnhancementEnabled(false);
+                    localStorage.setItem('videoEnhancement', 'false');
                     return;
                 }
             } catch (err) {
                 console.error('[MoviePlayer] VideoEnhancer error:', err);
+                setEnhancerReady(false);
+                setEnhancementEnabled(false);
+                localStorage.setItem('videoEnhancement', 'false');
                 return;
             }
         }
@@ -900,7 +909,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
             <video
                 ref={videoRef}
                 crossOrigin="anonymous"
-                className={`w-full h-full transition-all duration-300 ${isZoomToFill ? 'object-cover' : 'object-contain'} ${enhancementEnabled ? 'opacity-0' : 'opacity-100'}`}
+                className={`w-full h-full transition-all duration-300 ${isZoomToFill ? 'object-cover' : 'object-contain'} ${enhancementEnabled && enhancerReady ? 'opacity-0' : 'opacity-100'}`}
                 style={{ filter: `brightness(${brightness})` }}
                 onClick={togglePlay}
                 onTimeUpdate={handleTimeUpdate}
@@ -925,7 +934,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                 <canvas
                     ref={enhancedCanvasRef}
                     onClick={togglePlay}
-                    className={`absolute inset-0 w-full h-full transition-opacity duration-300 ${enhancementEnabled ? 'opacity-100 cursor-pointer' : 'opacity-0 pointer-events-none'} ${isZoomToFill ? 'object-cover' : 'object-contain'}`}
+                    className={`absolute inset-0 w-full h-full transition-opacity duration-300 ${enhancementEnabled && enhancerReady ? 'opacity-100 cursor-pointer' : 'opacity-0 pointer-events-none'} ${isZoomToFill ? 'object-cover' : 'object-contain'}`}
                     style={{ filter: `brightness(${brightness})` }}
                 />
             )}
