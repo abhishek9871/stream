@@ -14,8 +14,8 @@ class SuperEmbedService {
      * @param {number} episode - Episode number (for TV)
      */
     static async extractStream(imdbId, tmdbId = null, type = 'movie', season = null, episode = null) {
-        // 🚀 OPTIMIZED: Faster extraction means fewer retries needed
-        const maxRetries = 8; // Reduced from 12 (backend is now ~8-15s instead of 30-45s)
+        // 🚀 OPTIMIZED: Backend now targets ~10s extraction
+        const maxRetries = 6; // Reduced further (backend is now ~10s)
         let retryCount = 0;
 
         while (retryCount < maxRetries) {
@@ -50,7 +50,7 @@ class SuperEmbedService {
                 if (response.status === 429) {
                     retryCount++;
                     console.log(`[SuperEmbedService] ⏳ Extraction in progress, waiting... (attempt ${retryCount}/${maxRetries})`);
-                    await new Promise(resolve => setTimeout(resolve, 2000)); // Reduced from 3000ms to 2000ms
+                    await new Promise(resolve => setTimeout(resolve, 1500)); // Reduced to 1500ms
                     continue;
                 }
 
@@ -86,7 +86,7 @@ class SuperEmbedService {
         console.error('[SuperEmbedService] ❌ Extraction timed out after retries');
         return {
             success: false,
-            error: 'Extraction timed out - another extraction may be in progress'
+            error: 'Extraction timed out - please try again'
         };
     }
 

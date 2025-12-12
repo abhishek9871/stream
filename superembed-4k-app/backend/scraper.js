@@ -307,29 +307,21 @@ app.get('/api/extract', async (req, res) => {
         const status = response.status();
         if (status >= 400) return;
 
-        // 🎯 Capture M3U8 URLs - PRIORITIZE vipstream-S (workers.dev) but ONLY after server switch
+        // 🎯 Capture M3U8 URLs - ONLY from vipstream-S (after server switch)
+        // We do NOT want the default server's M3U8 - skip it entirely
         if (url.includes('.m3u8') && !url.includes('blob:')) {
-            console.log(`[M3U8] 🎯 FOUND: ${url.substring(0, 100)}...`);
+            // Only capture AFTER we've switched to vipstream-S
+            if (!serverSwitched) {
+                console.log(`[M3U8] ⏭️ SKIPPED (before server switch): ${url.substring(0, 60)}...`);
+                return;
+            }
 
-            // Check if this is a workers.dev URL
-            const isWorkersUrl = url.includes('workers.dev');
-
-            // 🔑 KEY FIX: Only capture as vipstream-S M3U8 AFTER we've clicked the server
-            // This fixes the bug where TV shows' default server also uses workers.dev
-            if (isWorkersUrl && serverSwitched && !vipstreamM3U8) {
-                // 🎯 This is the REAL vipstream-S M3U8 (after server switch)!
+            // Capture vipstream-S M3U8
+            if (!vipstreamM3U8) {
                 vipstreamM3U8 = url;
                 foundM3U8 = url;
-                console.log(`[M3U8] ⭐ VIPSTREAM-S M3U8 CAPTURED! (after server switch)`);
-                try {
-                    capturedReferer = response.request().headers()['referer'] || page.url();
-                } catch (e) {
-                    capturedReferer = page.url();
-                }
-            } else if (!foundM3U8) {
-                // Fallback: capture first M3U8 we see (may be lower quality default server)
-                foundM3U8 = url;
-                console.log(`[M3U8] 📦 Fallback M3U8 captured (default server)`);
+                console.log(`[M3U8] ⭐ VIPSTREAM-S M3U8 CAPTURED!`);
+                console.log(`[M3U8] URL: ${url.substring(0, 100)}...`);
                 try {
                     capturedReferer = response.request().headers()['referer'] || page.url();
                 } catch (e) {
@@ -399,283 +391,199 @@ app.get('/api/extract', async (req, res) => {
             : CONFIG.getTvUrl(tmdbId, imdbId, season, episode);
 
         console.log(`[Nav] Going to: ${targetUrl}`);
-        await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }); // Faster: domcontentloaded instead of networkidle2
         console.log(`[Nav] Redirected to: ${page.url()}`);
 
-        await sleep(1000); // Reduced from 2000ms
+        await sleep(500); // Reduced from 1000ms
 
         // ========================================
-        // STEP 1: Handle Interstitial Ad
-        // Interstitial has "Go to website" (left) and "Skip ad" (right)
-        // MUST click Skip ad BEFORE trying to click play button
+        // 🚀 OPTIMIZED STEP 1: Handle Interstitial Ad FAST
         // ========================================
-        console.log('[Step 1] Checking for interstitial ad...');
+        console.log('[Step 1] Handling interstitial ad (fast mode)...');
 
-        for (let i = 0; i < 8; i++) { // Reduced from 15 to 8
-            // 🚀 EARLY EXIT: If we already have vipstream M3U8, skip to server selection
-            if (vipstreamM3U8 && embeddedSubtitles.length > 0) {
-                console.log('[Step 1] ⚡ Already have M3U8 + subtitles - skipping!');
+        for (let i = 0; i < 5; i++) { // Reduced to 5 iterations max
+            // 🚀 EARLY EXIT
+            if (vipstreamM3U8) {
+                console.log('[Step 1] ⚡ M3U8 captured - skipping!');
                 break;
             }
 
-            // Check page state
             const pageState = await page.evaluate(() => {
                 const bodyText = document.body?.innerText || '';
-
-                // Check for interstitial ad presence
-                const hasInterstitial = bodyText.includes('Go to website') ||
-                    bodyText.toLowerCase().includes('skip ad');
-
-                // Check for countdown
+                const hasInterstitial = bodyText.includes('Go to website') || bodyText.toLowerCase().includes('skip ad');
                 const hasCountdown = bodyText.includes('Please wait');
-
-                // Check for error
                 const hasError = bodyText.includes('Error! Contact support');
 
-                // Find Skip ad button position (usually top-right)
+                // Find Skip ad button
                 let skipPos = null;
-                const allElements = [...document.querySelectorAll('*')];
-                for (const el of allElements) {
-                    const text = el.textContent?.trim().toLowerCase();
-                    if (text === 'skip ad' || text === 'skip') {
+                if (hasInterstitial) {
+                    for (const el of document.querySelectorAll('*')) {
+                        const text = el.textContent?.trim().toLowerCase();
+                        if (text === 'skip ad' || text === 'skip') {
+                            const rect = el.getBoundingClientRect();
+                            if (rect.width > 10 && rect.height > 10 && rect.y < 100) {
+                                skipPos = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+                                break;
+                            }
+                        }
+                    }
+                }
+                return { hasInterstitial, hasCountdown, hasError, skipPos };
+            });
+
+            if (pageState.hasError) {
+                console.log('[Ad] ⚠️ Error - reloading...');
+                await page.reload({ waitUntil: 'domcontentloaded' });
+                await sleep(1500);
+                continue;
+            }
+
+            if (!pageState.hasInterstitial) {
+                console.log('[Ad] ✅ Clear');
+                break;
+            }
+
+            if (pageState.skipPos) {
+                await page.mouse.move(pageState.skipPos.x, pageState.skipPos.y, { steps: 5 }); // Faster move
+                await sleep(200); // Reduced
+                await page.mouse.click(pageState.skipPos.x, pageState.skipPos.y);
+                console.log('[Ad] ✅ Clicked Skip Ad');
+                await sleep(800); // Reduced
+                await closeAllPopups(browser, mainPage);
+                await sleep(500); // Reduced
+                break; // Exit after clicking skip - don't wait more
+            }
+
+            await sleep(pageState.hasCountdown ? 800 : 500); // Faster polling
+        }
+
+        await closeAllPopups(browser, mainPage);
+
+        // ========================================
+        // 🚀 OPTIMIZED STEP 2: Click Play & Find SERVERS (Combined)
+        // Look for SERVERS button while clicking play - saves time
+        // ========================================
+        console.log('[Step 2] Click play & find SERVERS button...');
+
+        let serversFound = false;
+        for (let attempt = 0; attempt < 5; attempt++) { // Reduced to 5
+            await closeAllPopups(browser, mainPage);
+
+            if (vipstreamM3U8) {
+                console.log('[Step 2] ⚡ M3U8 captured!');
+                break;
+            }
+
+            // Check for both play button AND SERVERS button in one evaluation
+            const pageElements = await page.evaluate(() => {
+                const bodyText = document.body?.innerText || '';
+
+                // Check for SERVERS button first (higher priority)
+                let serversPos = null;
+                for (const el of document.querySelectorAll('*')) {
+                    const text = el.textContent?.trim();
+                    if (text && text.toUpperCase() === 'SERVERS') {
                         const rect = el.getBoundingClientRect();
-                        // Skip ad should be in top area and right side
-                        if (rect.width > 10 && rect.height > 10 && rect.y < 100) {
-                            skipPos = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+                        if (rect.width > 30 && rect.height > 15 && rect.y < 200) {
+                            serversPos = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
                             break;
                         }
                     }
                 }
 
-                return { hasInterstitial, hasCountdown, hasError, skipPos };
+                // Check for play button
+                let playPos = null;
+                const playEl = document.querySelector('.play-button') ||
+                              document.querySelector('svg#play') ||
+                              document.querySelector('#play') ||
+                              document.querySelector('[class*="play-button"]');
+                if (playEl) {
+                    const rect = playEl.getBoundingClientRect();
+                    playPos = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+                }
+
+                // Check for player iframe
+                const hasIframe = [...document.querySelectorAll('iframe')].some(
+                    f => f.src?.includes('vipstream') || f.src?.includes('vfx.php')
+                );
+
+                return { serversPos, playPos, hasIframe, hasError: bodyText.includes('Error! Contact support') };
             });
 
-            if (pageState.hasError) {
-                console.log('[Ad] ⚠️ Error detected - reloading...');
-                await page.reload({ waitUntil: 'networkidle2' });
-                await sleep(3000);
-                continue;
-            }
-
-            if (!pageState.hasInterstitial) {
-                console.log('[Ad] ✅ No interstitial - ready for play button');
-                break;
-            }
-
-            if (pageState.hasCountdown) {
-                console.log(`[Ad] ⏳ Countdown in progress (${i + 1}s)...`);
-                await sleep(1000);
-                continue;
-            }
-
-            if (pageState.skipPos) {
-                console.log(`[Ad] Found Skip Ad at (${Math.round(pageState.skipPos.x)}, ${Math.round(pageState.skipPos.y)})`);
-
-                // Move to Skip Ad slowly, pause, then click
-                await page.mouse.move(pageState.skipPos.x, pageState.skipPos.y, { steps: 10 });
-                await sleep(400);
-                await page.mouse.click(pageState.skipPos.x, pageState.skipPos.y);
-                console.log('[Ad] ✅ Clicked Skip Ad');
-
-                // IMPORTANT: Wait for popup and close it
+            if (pageElements.hasError) {
+                await page.reload({ waitUntil: 'domcontentloaded' });
                 await sleep(1500);
-                await closeAllPopups(browser, mainPage);
-
-                // Wait a bit more for the interstitial to fully disappear
-                await sleep(2000);
-            } else {
-                console.log(`[Ad] Interstitial present but no Skip button yet (${i + 1}s)`);
-            }
-
-            await sleep(1000);
-        }
-
-        // Extra cleanup
-        await closeAllPopups(browser, mainPage);
-        await sleep(500); // Reduced from 1000ms
-
-        // ========================================
-        // STEP 2: Verify interstitial is gone before clicking play
-        // ========================================
-        console.log('[Step 2] Verifying ad cleared before clicking play...');
-
-        const stillHasAd = await page.evaluate(() => {
-            const bodyText = document.body?.innerText || '';
-            return bodyText.includes('Go to website') || bodyText.toLowerCase().includes('skip ad');
-        });
-
-        if (stillHasAd) {
-            console.log('[Warning] Interstitial still present - waiting more...');
-            await sleep(3000);
-            await closeAllPopups(browser, mainPage);
-        }
-
-        // ========================================
-        // STEP 3: Click Play Button
-        // Only do this AFTER interstitial is confirmed gone
-        // ========================================
-        console.log('[Step 3] Clicking Play button...');
-
-        for (let attempt = 0; attempt < 8; attempt++) { // Reduced from 15 to 8
-            // Close any popups first
-            await closeAllPopups(browser, mainPage);
-
-            // 🚀 EARLY EXIT: Check if we already have what we need
-            if (vipstreamM3U8 && embeddedSubtitles.length > 0) {
-                console.log('[Step 3] ⚡ Already have vipstream M3U8 + subtitles!');
-                break;
-            }
-
-            if (foundM3U8) {
-                console.log('[Step 2] ✅ M3U8 already captured!');
-                break;
-            }
-
-            // Check if player iframe has appeared
-            const hasPlayerIframe = await page.evaluate(() => {
-                const iframes = document.querySelectorAll('iframe');
-                for (const iframe of iframes) {
-                    const src = iframe.src || '';
-                    if (src.includes('vipstream') || src.includes('vfx.php') || src.includes('player')) {
-                        return true;
-                    }
-                }
-                return false;
-            });
-
-            if (hasPlayerIframe || playerIframeFound) {
-                console.log('[Step 2] ✅ Player iframe detected!');
-                break;
-            }
-
-            // Get the play button position and use real mouse hover + click
-            const playButtonPos = await page.evaluate(() => {
-                // Try .play-button container first
-                let el = document.querySelector('.play-button');
-                if (!el) el = document.querySelector('svg#play');
-                if (!el) el = document.querySelector('#play');
-                if (!el) el = document.querySelector('[class*="play-button"]');
-                if (!el) el = document.querySelector('[class*="play"]');
-
-                if (el) {
-                    const rect = el.getBoundingClientRect();
-                    return {
-                        found: true,
-                        x: rect.x + rect.width / 2,
-                        y: rect.y + rect.height / 2,
-                        selector: el.className || el.id || el.tagName
-                    };
-                }
-                return { found: false };
-            });
-
-            // Check for error message and reload if needed
-            const hasError = await page.evaluate(() => {
-                return document.body?.innerText?.includes('Error! Contact support') || false;
-            });
-
-            if (hasError) {
-                console.log('[Error] ⚠️ "Error! Contact support" detected - reloading...');
-                await page.reload({ waitUntil: 'networkidle2' });
-                await sleep(3000);
                 continue;
             }
 
-            if (playButtonPos.found) {
-                console.log(`[Click] Attempt ${attempt + 1}: Play button at (${Math.round(playButtonPos.x)}, ${Math.round(playButtonPos.y)})`);
+            // If SERVERS button found, we can proceed to server selection!
+            if (pageElements.serversPos) {
+                console.log('[Step 2] ✅ SERVERS button found - skipping play click!');
+                serversFound = true;
+                break;
+            }
 
-                // Mimic real user: SLOW move, longer hover, then click
-                await page.mouse.move(playButtonPos.x, playButtonPos.y, { steps: 15 });
-                await sleep(500); // Longer hover
-                await page.mouse.click(playButtonPos.x, playButtonPos.y);
+            // If iframe loaded, we can proceed
+            if (pageElements.hasIframe || playerIframeFound) {
+                console.log('[Step 2] ✅ Player iframe detected');
+                break;
+            }
+
+            // Click play button if found
+            if (pageElements.playPos) {
+                await page.mouse.move(pageElements.playPos.x, pageElements.playPos.y, { steps: 8 }); // Faster
+                await sleep(300); // Reduced
+                await page.mouse.click(pageElements.playPos.x, pageElements.playPos.y);
+                console.log(`[Step 2] Clicked play (attempt ${attempt + 1})`);
             } else {
-                console.log(`[Click] Attempt ${attempt + 1}: No play button, clicking center`);
-                await page.mouse.move(640, 400, { steps: 10 });
-                await sleep(400);
+                // Click center as fallback
                 await page.mouse.click(640, 400);
             }
 
-            // Wait for popup and close it
-            await sleep(2000);
+            await sleep(1000); // Reduced from 2000
             await closeAllPopups(browser, mainPage);
         }
 
-        // ========================================
-        // STEP 3: Handle Player Iframe - Click Second Play Button
-        // ========================================
-        console.log('[Step 3] Looking for player iframe and second play button...');
-
-        await sleep(2000);
-
-        // Find and interact with player iframe
-        const frames = page.frames();
-        for (const frame of frames) {
-            const frameUrl = frame.url();
-            if (frameUrl.includes('vipstream') || frameUrl.includes('vfx.php') || frameUrl.includes('player')) {
-                console.log(`[Frame] Found player frame: ${frameUrl.substring(0, 80)}`);
-
-                try {
-                    // Click play button inside iframe (PlayerJS uses .pljsplay)
-                    await frame.evaluate(() => {
-                        // Try PlayerJS play button
-                        const pljsPlay = document.querySelector('.pljsplay');
-                        if (pljsPlay) {
-                            pljsPlay.click();
-                            return 'pljsplay';
-                        }
-
-                        // Try video element
-                        const video = document.querySelector('video');
-                        if (video) {
-                            video.play().catch(() => { });
-                            video.click();
-                            return 'video';
-                        }
-
-                        // Try generic play
-                        const playEl = document.querySelector('[class*="play"]');
-                        if (playEl) {
-                            playEl.click();
-                            return 'play-class';
-                        }
-
-                        // Click center
-                        const center = document.elementFromPoint(
-                            window.innerWidth / 2,
-                            window.innerHeight / 2
-                        );
-                        if (center) center.click();
-                        return 'center';
-                    });
-                    console.log('[Frame] Clicked play inside iframe');
-                } catch (e) {
-                    console.log('[Frame] Could not interact with iframe:', e.message);
+        // Quick iframe play click (non-blocking style)
+        if (!serversFound) {
+            const frames = page.frames();
+            for (const frame of frames) {
+                const frameUrl = frame.url();
+                if (frameUrl.includes('vipstream') || frameUrl.includes('vfx.php') || frameUrl.includes('player')) {
+                    try {
+                        await frame.evaluate(() => {
+                            const pljsPlay = document.querySelector('.pljsplay');
+                            if (pljsPlay) pljsPlay.click();
+                            const video = document.querySelector('video');
+                            if (video) video.play().catch(() => { });
+                        });
+                    } catch (e) { }
                 }
             }
+            await sleep(500); // Brief wait
         }
 
         // ========================================
-        // STEP 3.5: Select VIPStream-S Server
-        // Now that player is visible, click SERVERS and select vipstream-S
+        // 🚀 OPTIMIZED STEP 3: Select VIPStream-S Server (FAST)
         // ========================================
-        console.log('[Step 3.5] Selecting VIPStream-S server...');
-
-        // Reset M3U8 capture - we want the one from vipstream-S, not the default server
-        foundM3U8 = null;
-        capturedReferer = null;
-        playerIframeFound = false;
+        console.log('[Step 3] Selecting VIPStream-S server (fast mode)...');
 
         let serverSelected = false;
-        for (let attempt = 0; attempt < 5; attempt++) {
+        for (let attempt = 0; attempt < 4; attempt++) { // Reduced to 4
+            // 🚀 EARLY EXIT
+            if (vipstreamM3U8) {
+                console.log('[Step 3] ⚡ M3U8 captured!');
+                serverSelected = true;
+                break;
+            }
+
             // Look for SERVERS button
             const serversButton = await page.evaluate(() => {
-                const allElements = [...document.querySelectorAll('*')];
-                for (const el of allElements) {
+                for (const el of document.querySelectorAll('*')) {
                     const text = el.textContent?.trim();
-                    if (text && (text.toUpperCase() === 'SERVERS' || text.toUpperCase().includes('SERVERS'))) {
+                    if (text && text.toUpperCase() === 'SERVERS') {
                         const rect = el.getBoundingClientRect();
-                        // SERVERS button should be visible and in upper portion
-                        if (rect.width > 30 && rect.height > 15 && rect.y < 200 && rect.x > 0) {
+                        if (rect.width > 30 && rect.height > 15 && rect.y < 200) {
                             return { found: true, x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
                         }
                     }
@@ -684,345 +592,100 @@ app.get('/api/extract', async (req, res) => {
             });
 
             if (!serversButton.found) {
-                console.log(`[Server] SERVERS button not found yet (attempt ${attempt + 1})`);
-                await sleep(2000);
+                console.log(`[Server] SERVERS not found (attempt ${attempt + 1})`);
+                await sleep(1000); // Reduced
                 continue;
             }
 
-            console.log(`[Server] Found SERVERS button at (${Math.round(serversButton.x)}, ${Math.round(serversButton.y)})`);
-
             // Click SERVERS to open dropdown
-            await page.mouse.move(serversButton.x, serversButton.y, { steps: 8 });
-            await sleep(400);
+            await page.mouse.move(serversButton.x, serversButton.y, { steps: 5 }); // Faster
+            await sleep(200); // Reduced
             await page.mouse.click(serversButton.x, serversButton.y);
-            console.log('[Server] ✅ Clicked SERVERS button');
+            console.log('[Server] ✅ Clicked SERVERS');
 
-            await sleep(1500); // Wait for dropdown to appear (reduced from 2000ms)
+            await sleep(800); // Reduced from 1500ms
             await closeAllPopups(browser, mainPage);
 
-            // Look for vipstream-S in the dropdown
-            // Be VERY precise - find the smallest element with exact text "vipstream-S"
+            // Look for vipstream-S in the dropdown (simplified)
             const vipstreamOption = await page.evaluate(() => {
-                const allElements = [...document.querySelectorAll('*')];
                 let bestMatch = null;
                 let smallestArea = Infinity;
 
-                for (const el of allElements) {
-                    // Get direct text content (not including children)
-                    const directText = Array.from(el.childNodes)
-                        .filter(node => node.nodeType === Node.TEXT_NODE)
-                        .map(node => node.textContent.trim())
-                        .join('');
-
-                    const fullText = el.textContent?.trim().toLowerCase() || '';
-                    const directLower = directText.toLowerCase();
-
-                    // Match "vipstream-s" exactly or as direct text
-                    if (directLower === 'vipstream-s' ||
-                        fullText === 'vipstream-s' ||
-                        (directLower.includes('vipstream-s') && directLower.length < 30)) {
-
+                for (const el of document.querySelectorAll('*')) {
+                    const text = el.textContent?.trim().toLowerCase() || '';
+                    if (text === 'vipstream-s' || (text.includes('vipstream-s') && text.length < 20)) {
                         const rect = el.getBoundingClientRect();
                         const area = rect.width * rect.height;
-
-                        // Must be visible and reasonably sized
-                        if (rect.width > 30 && rect.height > 10 && rect.y > 30 && area > 0) {
-                            // Prefer smaller elements (the actual clickable link, not container)
-                            if (area < smallestArea) {
-                                smallestArea = area;
-                                bestMatch = {
-                                    found: true,
-                                    x: rect.x + rect.width / 2,
-                                    y: rect.y + rect.height / 2,
-                                    text: fullText,
-                                    width: rect.width,
-                                    height: rect.height
-                                };
-                            }
+                        if (rect.width > 30 && rect.height > 10 && rect.y > 30 && area < smallestArea) {
+                            smallestArea = area;
+                            bestMatch = { found: true, x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
                         }
                     }
                 }
-
                 return bestMatch || { found: false };
             });
 
             if (vipstreamOption.found) {
-                console.log(`[Server] Found vipstream-S at (${Math.round(vipstreamOption.x)}, ${Math.round(vipstreamOption.y)}) size: ${Math.round(vipstreamOption.width)}x${Math.round(vipstreamOption.height)}`);
-
-                // Move SLOWLY to the element
-                await page.mouse.move(vipstreamOption.x, vipstreamOption.y, { steps: 15 });
-                await sleep(600); // Hover for a moment
-
-                // Click it
+                await page.mouse.move(vipstreamOption.x, vipstreamOption.y, { steps: 5 }); // Faster
+                await sleep(200); // Reduced from 600ms
                 await page.mouse.click(vipstreamOption.x, vipstreamOption.y);
                 console.log('[Server] ✅ Clicked vipstream-S');
 
-                // Wait for page to start loading new server
-                await sleep(2500); // Reduced from 4000ms
+                serverSwitched = true; // Mark IMMEDIATELY after clicking
+                serverSelected = true;
+
+                await sleep(500); // Brief wait for server switch to start
                 await closeAllPopups(browser, mainPage);
 
-                // Verify we're now loading vipstream and NOT another server
-                const verification = await page.evaluate(() => {
-                    const bodyText = document.body?.innerText?.toLowerCase() || '';
-                    const iframes = document.querySelectorAll('iframe');
-                    let hasVipstream = false;
-
-                    for (const iframe of iframes) {
-                        if (iframe.src?.toLowerCase().includes('vipstream')) {
-                            hasVipstream = true;
-                        }
-                    }
-
-                    // Check for loading indicators
-                    const hasStreamtape = bodyText.includes('streamtape');
-                    const hasError = bodyText.includes('error') || bodyText.includes('failed');
-
-                    return { hasVipstream, hasStreamtape, hasError };
-                });
-
-                if (verification.hasStreamtape) {
-                    console.log('[Server] ⚠️ Streamtape loaded instead - will retry server selection');
-                    // Close dropdown and try again
-                    await page.mouse.click(100, 100);
-                    await sleep(1000);
-                    continue;
-                }
-
-                serverSelected = true;
-                serverSwitched = true; // Mark that we've switched to vipstream-S
-                console.log('[Server] ✅ VIPStream-S server selected successfully');
-
-                // 🚀 EARLY EXIT: If we already have vipstream M3U8, skip everything else!
-                if (vipstreamM3U8 && embeddedSubtitles.length > 0) {
-                    console.log('[Server] ⚡ FAST PATH: Already have M3U8 + subtitles, skipping countdown!');
-                    break;
-                }
+                // 🚀 Don't wait for verification - M3U8 will be captured by network handler
+                console.log('[Server] ✅ Server switch initiated');
                 break;
             } else {
-                console.log('[Server] vipstream-S not found in dropdown, retrying...');
-                // Click somewhere else to close dropdown
-                await page.mouse.click(100, 100);
-                await sleep(1000);
+                console.log('[Server] vipstream-S not found, retrying...');
+                await page.mouse.click(100, 100); // Close dropdown
+                await sleep(500);
             }
         }
 
-        if (serverSelected) {
-            // 🚀 FAST PATH: If we already have vipstream M3U8, skip ALL remaining steps!
-            if (vipstreamM3U8 && embeddedSubtitles.length > 0) {
-                console.log('[Step 3.6] ⚡ SKIPPING - Already have vipstream M3U8 + subtitles!');
-                // Jump directly to results - no need to wait for countdown
-            } else {
-                // ========================================
-                // STEP 3.6: Handle Access Content / Play Now after server switch
-                // Only needed if we don't have M3U8 yet (unlikely with network capture)
-                // ========================================
-                console.log('[Step 3.6] Handling Access Content interstitial...');
-
-                // Reduced from 15 to 5 iterations - M3U8 should be captured by network handler
-                for (let i = 0; i < 5; i++) {
-                    // 🚀 CHECK EARLY: If we got vipstream M3U8, exit immediately!
-                    if (vipstreamM3U8) {
-                        console.log('[Access] ⚡ vipstream M3U8 captured - exiting countdown early!');
-                        break;
-                    }
-
-                    const accessContent = await page.evaluate(() => {
-                        const bodyText = document.body?.innerText || '';
-
-                        // Check for waiting countdown
-                        if (bodyText.includes('Please wait')) {
-                            return { waiting: true };
-                        }
-
-                        // Check for Access Content / Play Now
-                        if (bodyText.includes('Access Content') || bodyText.includes('Play Now')) {
-                            const allElements = [...document.querySelectorAll('*')];
-                            for (const el of allElements) {
-                                const text = el.textContent?.trim();
-                                if (text === 'Play Now') {
-                                    const rect = el.getBoundingClientRect();
-                                    if (rect.width > 50 && rect.height > 20) {
-                                        return { hasPlayNow: true, x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
-                                    }
-                                }
-                            }
-                            return { hasAccessContent: true };
-                        }
-
-                        return { clear: true };
-                    });
-
-                    if (accessContent.clear) {
-                        console.log('[Access] ✅ No interstitial');
-                        break;
-                    }
-
-                    // 🚀 CHECK: Exit if we got vipstream M3U8
-                    if (vipstreamM3U8) {
-                        console.log('[Access] ⚡ vipstream M3U8 captured - exiting!');
-                        break;
-                    }
-
-                    if (accessContent.waiting) {
-                        console.log(`[Access] ⏳ Waiting for countdown (${i + 1}s)...`);
-                        await sleep(1000);
-                        continue;
-                    }
-
-                    if (accessContent.hasPlayNow) {
-                        console.log(`[Access] Found Play Now at (${Math.round(accessContent.x)}, ${Math.round(accessContent.y)})`);
-                        await page.mouse.move(accessContent.x, accessContent.y, { steps: 5 });
-                        await sleep(300);
-                        await page.mouse.click(accessContent.x, accessContent.y);
-                        console.log('[Access] ✅ Clicked Play Now');
-                        await sleep(1000);
-                        await closeAllPopups(browser, mainPage);
-                    }
-
-                    await sleep(1000);
-                }
-
-                // 🚀 SKIP Steps 3.7, 3.8 if we already have M3U8
-                if (!vipstreamM3U8) {
-                    // ========================================
-                    // STEP 3.7: Handle Skip Ad again after server switch (ONLY if no M3U8 yet)
-                    // ========================================
-                    console.log('[Step 3.7] Checking for Skip Ad after server switch...');
-
-                    await sleep(1000); // Reduced from 2000ms
-
-                    for (let i = 0; i < 5; i++) { // Reduced from 20 to 5
-                        // Check for M3U8 at start of each iteration
-                        if (vipstreamM3U8) {
-                            console.log('[Ad] ⚡ vipstream M3U8 captured - skipping!');
-                            break;
-                        }
-
-                        const adState = await page.evaluate(() => {
-                            const bodyText = document.body?.innerText || '';
-                            const bodyLower = bodyText.toLowerCase();
-
-                            const hasInterstitial = bodyText.includes('Go to website') ||
-                                bodyLower.includes('skip ad');
-
-                            if (hasInterstitial) {
-                                const allElements = [...document.querySelectorAll('*')];
-                                for (const el of allElements) {
-                                    const text = el.textContent?.trim().toLowerCase();
-                                    if (text === 'skip ad' || text === 'skip') {
-                                        const rect = el.getBoundingClientRect();
-                                        if (rect.width > 10 && rect.height > 10 && rect.y < 200 && rect.x > 0) {
-                                            return {
-                                                hasAd: true,
-                                                skipPos: { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
-                                            };
-                                        }
-                                    }
-                                }
-                                return { hasAd: true, skipPos: null };
-                            }
-
-                            return { clear: true };
-                        });
-
-                        if (adState.clear) {
-                            console.log('[Ad] ✅ No Skip Ad detected');
-                            break;
-                        }
-
-                        if (adState.skipPos) {
-                            await page.mouse.move(adState.skipPos.x, adState.skipPos.y, { steps: 5 });
-                            await sleep(300);
-                            await page.mouse.click(adState.skipPos.x, adState.skipPos.y);
-                            console.log('[Ad] ✅ Clicked Skip Ad');
-                            await sleep(1000);
-                            await closeAllPopups(browser, mainPage);
-                        }
-
-                        await sleep(500);
-                    }
-
-                    await closeAllPopups(browser, mainPage);
-
-                    // ========================================
-                    // STEP 3.8: Click Play button (ONLY if no M3U8 yet)
-                    // ========================================
-                    if (!vipstreamM3U8) {
-                        console.log('[Step 3.8] Clicking play button for vipstream-S...');
-
-                        for (let attempt = 0; attempt < 3; attempt++) { // Reduced from 10 to 3
-                            await closeAllPopups(browser, mainPage);
-
-                            if (vipstreamM3U8 || foundM3U8) {
-                                console.log('[Play] ✅ M3U8 captured from vipstream-S!');
-                                break;
-                            }
-
-                            // Just click center - don't waste time looking for button
-                            console.log(`[Play] Attempt ${attempt + 1}: Clicking center`);
-                            await page.mouse.click(640, 400);
-                            await sleep(1000);
-                        }
-
-                        // Quick iframe click
-                        for (const frame of page.frames()) {
-                            const frameUrl = frame.url();
-                            if (frameUrl.includes('vipstream') || frameUrl.includes('vfx.php')) {
-                                console.log(`[Frame] Clicking play in vipstream-S iframe`);
-                                try {
-                                    await frame.evaluate(() => {
-                                        const pljsPlay = document.querySelector('.pljsplay');
-                                        if (pljsPlay) pljsPlay.click();
-                                        const video = document.querySelector('video');
-                                        if (video) video.play().catch(() => { });
-                                    });
-                                } catch (e) { }
-                            }
-                        }
-                    }
-                } else {
-                    console.log('[Step 3.7-3.8] ⚡ SKIPPING - Already have vipstream M3U8!');
-                }
-            } // End of else block for Steps 3.6-3.8
-        }
-
         // ========================================
-        // STEP 4: Wait for M3U8 (FAST - check immediately, minimal waiting)
+        // 🚀 OPTIMIZED STEP 4: Wait for M3U8 (minimal waiting)
+        // Network handler captures M3U8 automatically after serverSwitched=true
         // ========================================
+        console.log('[Step 4] Waiting for vipstream-S M3U8...');
 
-        // 🚀 Use vipstream M3U8 if available, otherwise fall back to any M3U8
-        if (vipstreamM3U8) {
-            foundM3U8 = vipstreamM3U8;
-            console.log('[Step 4] ⚡ Using already-captured vipstream M3U8!');
-        } else if (foundM3U8) {
-            console.log('[Step 4] Using fallback M3U8 (non-vipstream)');
-        } else {
-            console.log('[Step 4] Waiting for M3U8...');
+        // Give network handler time to capture M3U8
+        for (let i = 0; i < 8; i++) { // Max 4 seconds wait
+            if (vipstreamM3U8) {
+                foundM3U8 = vipstreamM3U8;
+                console.log(`[Step 4] ⚡ M3U8 captured in ${(i + 1) * 0.5}s!`);
+                break;
+            }
 
-            for (let i = 0; i < 10; i++) { // Reduced from 20 to 10
-                await sleep(500); // Reduced from 800ms
+            await sleep(500);
 
-                if (vipstreamM3U8 || foundM3U8) {
-                    if (vipstreamM3U8) foundM3U8 = vipstreamM3U8;
-                    console.log(`[M3U8] ✅ Captured after ${(i + 1) * 0.5} seconds`);
-                    break;
-                }
-
-                // Every 2 seconds, try clicking in frames
-                if (i % 4 === 0 && i > 0) {
-                    console.log(`[Wait] ${i * 0.5}s - Retrying...`);
-                    await closeAllPopups(browser, mainPage);
-
-                    for (const frame of page.frames()) {
+            // After 2 seconds, try clicking play in iframe to trigger M3U8 load
+            if (i === 4 && !vipstreamM3U8) {
+                console.log('[Step 4] Clicking in iframe to trigger playback...');
+                for (const frame of page.frames()) {
+                    const frameUrl = frame.url();
+                    if (frameUrl.includes('vipstream') || frameUrl.includes('vfx.php')) {
                         try {
                             await frame.evaluate(() => {
-                                const v = document.querySelector('video');
-                                if (v) v.play().catch(() => { });
+                                const pljsPlay = document.querySelector('.pljsplay');
+                                if (pljsPlay) pljsPlay.click();
+                                const video = document.querySelector('video');
+                                if (video) video.play().catch(() => { });
                             });
                         } catch (e) { }
                     }
                 }
+                await closeAllPopups(browser, mainPage);
             }
+        }
+
+        // Final check
+        if (vipstreamM3U8) {
+            foundM3U8 = vipstreamM3U8;
         }
 
         // ========================================
@@ -1058,8 +721,7 @@ app.get('/api/extract', async (req, res) => {
     // Return results
     if (foundM3U8) {
         const referer = capturedReferer || 'https://streamingnow.mov/';
-        const isVipstream = foundM3U8.includes('workers.dev');
-        console.log(`[Result] ✅ M3U8 FOUND ${isVipstream ? '(vipstream-S ⚡)' : '(fallback)'}`);
+        console.log(`[Result] ✅ VIPSTREAM-S M3U8 CAPTURED!`);
         console.log(`[Result] M3U8: ${foundM3U8.substring(0, 80)}...`);
 
         const proxyBase = `http://${req.get('host')}`;
