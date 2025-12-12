@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { MoviePlayer } from './MoviePlayer';
 import SuperEmbedService from '../../services/SuperEmbedService';
 import { ExtractedStream } from '../../types/stream';
-import { processSubtitles, cleanupSubtitleUrls, ProcessedSubtitle } from '../../services/SubtitleService';
+import { processSubtitles } from '../../services/SubtitleService';
 
 interface StreamContainerProps {
     tmdbId?: number;
@@ -15,6 +15,7 @@ interface StreamContainerProps {
     onClose: () => void;
     nextEpisode?: { season: number; episode: number; title: string };
     onPlayNext?: () => void;
+    embedded?: boolean; // New prop to control finding style
 }
 
 export const StreamContainer: React.FC<StreamContainerProps> = ({
@@ -27,7 +28,8 @@ export const StreamContainer: React.FC<StreamContainerProps> = ({
     poster,
     onClose,
     nextEpisode,
-    onPlayNext
+    onPlayNext,
+    embedded = false
 }) => {
     const [stream, setStream] = useState<ExtractedStream | null>(null);
     const [loading, setLoading] = useState(true);
@@ -37,11 +39,7 @@ export const StreamContainer: React.FC<StreamContainerProps> = ({
 
     useEffect(() => {
         componentMounted.current = true;
-
-        // Start extraction immediately - no delay needed
-        // The backend handles concurrent request protection via isExtracting lock
         extract();
-
         return () => {
             componentMounted.current = false;
         };
@@ -67,85 +65,57 @@ export const StreamContainer: React.FC<StreamContainerProps> = ({
             if (!componentMounted.current) return;
 
             if (result.success) {
-                // 🚀 START PLAYBACK IMMEDIATELY - don't wait for subtitles!
                 console.log('[StreamContainer] ✅ Starting playback immediately');
                 setStream({
                     success: true,
                     m3u8Url: result.m3u8Url,
-                    subtitles: [], // Start with no subtitles
+                    subtitles: [],
                     referer: result.referer
                 });
                 setLoading(false);
 
-                // 🎬 PROCESS SUBTITLES IN BACKGROUND (non-blocking)
                 if (result.subtitles && result.subtitles.length > 0) {
-                    // Check if we have embedded subtitles (perfectly synced from source)
-                    const hasEmbedded = result.subtitles.some((s: any) => s.source === 'embedded');
-                    console.log(`[StreamContainer] 📥 Processing ${result.subtitles.length} subtitles in background... (embedded: ${hasEmbedded})`);
-
-                    // Process subtitles asynchronously - don't await!
                     processSubtitles(result.subtitles)
                         .then(processedSubtitles => {
                             if (!componentMounted.current) return;
-
-                            // Convert to subtitle tracks format
-                            // First subtitle is best quality (embedded has score 1000, always first)
                             const subtitleTracks = processedSubtitles.map((sub, index) => ({
                                 label: sub.label,
                                 lang: sub.lang,
                                 file: sub.vttUrl,
-                                default: index === 0 // First = best quality = default
+                                default: index === 0
                             }));
-
-                            if (subtitleTracks.length > 0) {
-                                console.log(`[StreamContainer] ✅ ${subtitleTracks.length} subtitles ready - best: "${subtitleTracks[0].label}" (default: true)`);
-                            }
-
-                            // Update stream with subtitles (player will reactively update)
-                            setStream(prev => prev ? {
-                                ...prev,
-                                subtitles: subtitleTracks
-                            } : null);
+                            setStream(prev => prev ? { ...prev, subtitles: subtitleTracks } : null);
                         })
-                        .catch(subError => {
-                            console.error('[StreamContainer] Subtitle processing error:', subError);
-                            // Silently fail - playback continues without subtitles
-                        });
+                        .catch(err => console.error(err));
                 }
             } else {
-                console.error('Stream extraction failed:', result.error);
                 setError(result.error || 'Failed to find a high-quality stream.');
                 setLoading(false);
             }
         } catch (err: any) {
             if (!componentMounted.current) return;
-            console.error('Stream extraction error:', err);
             setError(err.message || 'Connection error');
             setLoading(false);
         }
     };
 
+    const containerClass = embedded
+        ? "w-full h-full bg-black relative"
+        : "fixed inset-0 z-50 bg-black animate-fade-in";
+
     if (error) {
         return (
-            <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-4 font-display">
-                <div className="max-w-md w-full bg-neutral-900 border border-white/10 rounded-2xl p-8 text-center relative overflow-hidden">
+            <div className={containerClass + " flex items-center justify-center p-4"}>
+                <div className="max-w-md w-full bg-zinc-900/90 border border-white/10 rounded-2xl p-8 text-center relative overflow-hidden backdrop-blur-xl">
                     <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-red-500 via-orange-500 to-red-500"></div>
-
                     <span className="material-symbols-outlined text-5xl text-red-500 mb-4">error_outline</span>
-                    <h3 className="text-2xl font-bold text-white mb-2">Stream Unavailable</h3>
-                    <p className="text-white/60 mb-8">{error}</p>
-
+                    <h3 className="text-2xl font-bold text-white mb-2 font-display">Stream Unavailable</h3>
+                    <p className="text-zinc-400 mb-8">{error}</p>
                     <div className="flex gap-4 justify-center">
-                        <button
-                            onClick={onClose}
-                            className="px-6 py-2.5 rounded-lg font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors"
-                        >
-                            Close
+                        <button onClick={onClose} className="px-6 py-2.5 rounded-lg font-bold text-zinc-300 hover:text-white hover:bg-white/10 transition-colors">
+                            Back
                         </button>
-                        <button
-                            onClick={extract}
-                            className="px-6 py-2.5 rounded-lg font-medium bg-white text-black hover:bg-neutral-200 transition-colors"
-                        >
+                        <button onClick={extract} className="px-6 py-2.5 rounded-lg font-bold bg-white text-black hover:bg-zinc-200 transition-colors">
                             Try Again
                         </button>
                     </div>
@@ -156,31 +126,28 @@ export const StreamContainer: React.FC<StreamContainerProps> = ({
 
     if (loading || !stream) {
         return (
-            <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center font-display">
-                {/* Cinema Loader */}
+            <div className={containerClass + " flex flex-col items-center justify-center"}>
                 <div className="relative w-24 h-24 mb-8">
                     <div className="absolute inset-0 border-t-4 border-primary rounded-full animate-spin"></div>
                     <div className="absolute inset-2 border-r-4 border-secondary rounded-full animate-spin animation-delay-200"></div>
                     <div className="absolute inset-4 border-b-4 border-accent rounded-full animate-spin animation-delay-500"></div>
                 </div>
-
-                <h3 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-white via-white to-white/50 animate-pulse mb-2">
-                    Loading Movie
+                <h3 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-white via-zinc-200 to-zinc-500 animate-pulse mb-2 font-display">
+                    Loading Stream
                 </h3>
-                <p className="text-white/50 font-mono text-sm tracking-wider">{status}</p>
+                <p className="text-zinc-500 font-mono text-xs tracking-wider uppercase">{status}</p>
 
-                <button
-                    onClick={onClose}
-                    className="absolute top-8 right-8 text-white/50 hover:text-white transition-colors"
-                >
-                    <span className="material-symbols-outlined text-3xl">close</span>
-                </button>
+                {!embedded && (
+                    <button onClick={onClose} className="absolute top-8 right-8 text-zinc-500 hover:text-white transition-colors p-2 hover:bg-white/10 rounded-full">
+                        <span className="material-symbols-outlined text-3xl">close</span>
+                    </button>
+                )}
             </div>
         );
     }
 
     return (
-        <div className="fixed inset-0 z-50 bg-black animate-fade-in">
+        <div className={containerClass}>
             <MoviePlayer
                 extracted={stream}
                 title={title}

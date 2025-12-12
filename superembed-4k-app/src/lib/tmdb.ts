@@ -8,6 +8,7 @@ export const TMDB = {
         return `${IMAGE_BASE_URL}/${size}${path}`;
     },
 
+    // Movies
     getTrending: async (page = 1) => {
         const res = await fetch(`${BASE_URL}/trending/movie/week?api_key=${TMDB_API_KEY}&page=${page}`);
         return res.json();
@@ -23,13 +24,37 @@ export const TMDB = {
         return res.json();
     },
 
+    // TV Shows
+    getTrendingTv: async (page = 1) => {
+        const res = await fetch(`${BASE_URL}/trending/tv/week?api_key=${TMDB_API_KEY}&page=${page}`);
+        return res.json();
+    },
+
+    getPopularTv: async (page = 1) => {
+        const res = await fetch(`${BASE_URL}/tv/popular?api_key=${TMDB_API_KEY}&page=${page}`);
+        return res.json();
+    },
+
+    getTopRatedTv: async (page = 1) => {
+        const res = await fetch(`${BASE_URL}/tv/top_rated?api_key=${TMDB_API_KEY}&page=${page}`);
+        return res.json();
+    },
+
+    // Search
     search: async (query: string, page = 1) => {
         const res = await fetch(`${BASE_URL}/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}&page=${page}`);
         return res.json();
     },
 
+    // Details - Unified
     getDetails: async (id: number, type: 'movie' | 'tv' = 'movie') => {
-        const res = await fetch(`${BASE_URL}/${type}/${id}?api_key=${TMDB_API_KEY}&append_to_response=credits,similar,videos`);
+        const res = await fetch(`${BASE_URL}/${type}/${id}?api_key=${TMDB_API_KEY}&append_to_response=credits,similar,videos,recommendations,external_ids`);
+        return res.json();
+    },
+
+    // TV Specific
+    getSeasonDetails: async (tvId: number, seasonNumber: number) => {
+        const res = await fetch(`${BASE_URL}/tv/${tvId}/season/${seasonNumber}?api_key=${TMDB_API_KEY}`);
         return res.json();
     }
 };
