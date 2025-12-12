@@ -1,0 +1,19 @@
+Launching browser...
+
+Navigating to multiembed...
+[PLAY] STJDVVFEK0cxTWtjNGJMSVRGb0tTaXFUVStmQ3NR...
+
+Waiting 10s for all iframes to load...
+
+
+========== ALL CAPTURED TOKENS ==========
+1. [play] STJDVVFEK0cxTWtjNGJMSVRGb0tTaXFUVStmQ3NRakRNcXVqOWtNdWljQ0hn...
+
+
+========== TESTING TOKENS WITH S=88 ==========
+
+[play] Testing...
+  Size: 967, wispy: false, workers: false
+
+
+Done!

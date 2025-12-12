@@ -1,0 +1,23 @@
+
+========== Analyzing TMDB 238 (movie) ==========
+
+Step 1: Fetching https://multiembed.mov/?video_id=238&tmdb=1
+Response status: 200
+Response length: 677017 bytes
+
+--- Pattern Search ---
+
+[streamingnow.mov URLs]:
+   https://streamingnow.mov/?play=TG1PUVRqMkcxTVFmNWJ6S1RGb0tTaXFUVStmQ3NRakRNcXVrOWtNcGljZUxnQ1JOd21GbGcweTN5anF5RjN3NGFiSUw0ZU9LUEo0cmV6ZG5TcVRKc09nNW5
+
+ΓÜá∩╕Å No token found in response
+
+Γ¥î Could not extract token. Trying with known test token...
+
+========== Testing vipstream_vfx.php (Server 88) ==========
+
+Fetching: https://streamingnow.mov/vipstream_vfx.php?s=88&token=TG1TVFNpS0d5TUVWNUxQTFVGb0lWeWlMVStUQXJnemNJNm...
+Response length: 6972 bytes
+
+≡ƒöÑ WORKERS.DEV M3U8 FOUND:
+https://wispy-resonance-f4fd.ice-shut619.workers.dev/pqbDzLYlNR4zZQJP7U9a8tg0dwZ1TbX31aC1QzIoED0LUKlmKXv6eXtGE7Kgys4dXjmA0DV1QU05Qlqe5hGgFg56sv8hzI/1Gy9h7+G6IoPBO6x6Z534HIE4Quixv5a7hyL27J/RSg0YYqs2hvXF+eqZcZITt0PEzg5iLG8kvKJ0CZ1hz3qkprvgOKGZD1rfOfhmsS5q7IXSfJ0j93Qpfv5m00RMjQHFOmRO2N4kczgQRZczcIbX1Yp8a4onajj/W/458faYB3ODU8Jk3PKnQQEdu7amfEkZm8/L5dtbF1uAmuYGhs3yTHsNHTvk52nnHe5onD/zKMURnUqo4PPrFQ==.m3u8

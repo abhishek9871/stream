@@ -1,0 +1,43 @@
+Launching browser...
+
+Navigating to multiembed...
+
+[REQ] streamingnow.mov: https://streamingnow.mov/?play=SzJTV1NqeUcxTUVZNDdqTFRGb0tTaXFUVStmQ3NRakRNcXVqOWtNcGljT1BnQ1JNdzJOdGpFeTN5anF5RjN3NGFiSUw0ZU9LUEo0cmV6ZG5TcVRKc09nNW5
+
+[REQ] streamingnow.mov: https://streamingnow.mov/css/main.css?v=7
+
+[REQ] streamingnow.mov: https://streamingnow.mov/js/main.js?v=4
+
+[REQ] streamingnow.mov: https://streamingnow.mov/js/dd.js
+
+[REQ] streamingnow.mov: https://adexchangeclear.com/script/suurl5.php?r=9257962&chu=%22Google%20Chrome%22%3Bv%3D143%2C%20%22Chromium%22%3Bv%3D143%2C%20%22Not%20A(Brand%22%3Bv
+
+[REQ] streamingnow.mov: https://adexchangeclear.com/script/interstitial.php?r=9463206&chu=%22Google%20Chrome%22%3Bv%3D143%2C%20%22Chromium%22%3Bv%3D143%2C%20%22Not%20A(Brand%
+
+[REQ] streamingnow.mov: https://s4.histats.com/stats/0.php?4586979&@f16&@g1&@h1&@i1&@j1765549393749&@k0&@l1&@mStreaming...&@n0&@o1000&@q0&@r0&@s0&@ten-US&@u1536&@b1:109684575
+
+[REQ] streamingnow.mov: https://e.dtscout.com/e/?v=1a&pid=5200&site=1&l=https%3A%2F%2Fstreamingnow.mov%2F%3Fplay%3DSzJTV1NqeUcxTUVZNDdqTFRGb0tTaXFUVStmQ3NRakRNcXVqOWtNcGljT1B
+
+[REQ] streamingnow.mov: https://t.dtscout.com/pv/?_a=v&_h=streamingnow.mov&_ss=i4iycaaiu3&_pv=1&_ls=0&_u1=1&_u3=1&_cc=in&_pl=d&_cbid=1rvt&_cb=_dtspv.c
+
+[REQ] streamingnow.mov: https://t.dtscdn.com/widget/?d=6D001765549395FF8D064CC1643142C2&nid=300&p=2114454483&t=-330&s=1536x864x24&u=https%3A%2F%2Fstreamingnow.mov%2F%3Fplay%3
+
+[REQ] streamingnow.mov: https://streamingnow.mov/cdn-cgi/rum?
+
+[REQ] streamingnow.mov: https://streamingnow.mov/favicon.ico
+
+
+========== CAPTURED TOKENS ==========
+1. play: SzJTV1NqeUcxTUVZNDdqTFRGb0tTaXFUVStmQ3NRakRNcXVqOW...
+
+
+========== TESTING TOKENS ==========
+
+Testing play token with s=88...
+  Response: 967 bytes
+  wispy-resonance: false
+  workers.dev: false
+  .m3u8: false
+
+
+Done!

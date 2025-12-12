@@ -1,0 +1,15 @@
+Launching browser...
+
+Navigating to multiembed (The Godfather)...
+
+Waiting 15 seconds for all network activity...
+
+========== SUMMARY ==========
+Total requests: 52
+VFX Token: NOT FOUND
+
+Γ¥î No VFX token captured. Page may need user interaction to load a server.
+
+VFX-related URLs: 0
+
+Done!

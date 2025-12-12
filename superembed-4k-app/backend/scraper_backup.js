@@ -307,29 +307,26 @@ app.get('/api/extract', async (req, res) => {
         const status = response.status();
         if (status >= 400) return;
 
-        // 🎯 Capture M3U8 URLs - PRIORITIZE vipstream-S (workers.dev) but ONLY after server switch
+        // 🎯 Capture M3U8 URLs - PRIORITIZE workers.dev (vipstream-S)
         if (url.includes('.m3u8') && !url.includes('blob:')) {
             console.log(`[M3U8] 🎯 FOUND: ${url.substring(0, 100)}...`);
 
-            // Check if this is a workers.dev URL
-            const isWorkersUrl = url.includes('workers.dev');
+            // Check if this is a vipstream-S URL (workers.dev)
+            const isVipstreamS = url.includes('workers.dev');
 
-            // 🔑 KEY FIX: Only capture as vipstream-S M3U8 AFTER we've clicked the server
-            // This fixes the bug where TV shows' default server also uses workers.dev
-            if (isWorkersUrl && serverSwitched && !vipstreamM3U8) {
-                // 🎯 This is the REAL vipstream-S M3U8 (after server switch)!
+            if (isVipstreamS && !vipstreamM3U8) {
+                // 🎯 This is the M3U8 we actually want!
                 vipstreamM3U8 = url;
-                foundM3U8 = url;
-                console.log(`[M3U8] ⭐ VIPSTREAM-S M3U8 CAPTURED! (after server switch)`);
+                foundM3U8 = url; // Also set as main M3U8
+                console.log(`[M3U8] ⭐ VIPSTREAM-S M3U8 CAPTURED!`);
                 try {
                     capturedReferer = response.request().headers()['referer'] || page.url();
                 } catch (e) {
                     capturedReferer = page.url();
                 }
-            } else if (!foundM3U8) {
-                // Fallback: capture first M3U8 we see (may be lower quality default server)
+            } else if (!foundM3U8 && !isVipstreamS) {
+                // Fallback: capture non-vipstream M3U8 only if we don't have any
                 foundM3U8 = url;
-                console.log(`[M3U8] 📦 Fallback M3U8 captured (default server)`);
                 try {
                     capturedReferer = response.request().headers()['referer'] || page.url();
                 } catch (e) {
@@ -891,99 +888,12 @@ app.get('/api/extract', async (req, res) => {
 
                     await sleep(1000); // Reduced from 2000ms
 
-                    for (let i = 0; i < 5; i++) { // Reduced from 20 to 5
-                        // Check for M3U8 at start of each iteration
-                        if (vipstreamM3U8) {
-                            console.log('[Ad] ⚡ vipstream M3U8 captured - skipping!');
-                            break;
-                        }
-
-                        const adState = await page.evaluate(() => {
-                            const bodyText = document.body?.innerText || '';
-                            const bodyLower = bodyText.toLowerCase();
-
-                            const hasInterstitial = bodyText.includes('Go to website') ||
-                                bodyLower.includes('skip ad');
-
-                            if (hasInterstitial) {
-                                const allElements = [...document.querySelectorAll('*')];
-                                for (const el of allElements) {
-                                    const text = el.textContent?.trim().toLowerCase();
-                                    if (text === 'skip ad' || text === 'skip') {
-                                        const rect = el.getBoundingClientRect();
-                                        if (rect.width > 10 && rect.height > 10 && rect.y < 200 && rect.x > 0) {
-                                            return {
-                                                hasAd: true,
-                                                skipPos: { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
-                                            };
-                                        }
-                                    }
-                                }
-                                return { hasAd: true, skipPos: null };
-                            }
-
-                            return { clear: true };
-                        });
-
-                        if (adState.clear) {
-                            console.log('[Ad] ✅ No Skip Ad detected');
-                            break;
-                        }
-
-                        if (adState.skipPos) {
-                            await page.mouse.move(adState.skipPos.x, adState.skipPos.y, { steps: 5 });
-                            await sleep(300);
-                            await page.mouse.click(adState.skipPos.x, adState.skipPos.y);
-                            console.log('[Ad] ✅ Clicked Skip Ad');
-                            await sleep(1000);
-                            await closeAllPopups(browser, mainPage);
-                        }
-
-                        await sleep(500);
-                    }
-
-                    await closeAllPopups(browser, mainPage);
-
-                    // ========================================
-                    // STEP 3.8: Click Play button (ONLY if no M3U8 yet)
-                    // ========================================
-                    if (!vipstreamM3U8) {
-                        console.log('[Step 3.8] Clicking play button for vipstream-S...');
-
-                        for (let attempt = 0; attempt < 3; attempt++) { // Reduced from 10 to 3
-                            await closeAllPopups(browser, mainPage);
-
-                            if (vipstreamM3U8 || foundM3U8) {
-                                console.log('[Play] ✅ M3U8 captured from vipstream-S!');
-                                break;
-                            }
-
-                            // Just click center - don't waste time looking for button
-                            console.log(`[Play] Attempt ${attempt + 1}: Clicking center`);
-                            await page.mouse.click(640, 400);
-                            await sleep(1000);
-                        }
-
-                        // Quick iframe click
-                        for (const frame of page.frames()) {
-                            const frameUrl = frame.url();
-                            if (frameUrl.includes('vipstream') || frameUrl.includes('vfx.php')) {
-                                console.log(`[Frame] Clicking play in vipstream-S iframe`);
-                                try {
-                                    await frame.evaluate(() => {
-                                        const pljsPlay = document.querySelector('.pljsplay');
-                                        if (pljsPlay) pljsPlay.click();
-                                        const video = document.querySelector('video');
-                                        if (video) video.play().catch(() => { });
-                                    });
-                                } catch (e) { }
-                            }
-                        }
-                    }
-                } else {
-                    console.log('[Step 3.7-3.8] ⚡ SKIPPING - Already have vipstream M3U8!');
                 }
-            } // End of else block for Steps 3.6-3.8
+            }
+        } else {
+            console.log('[Step 3.7-3.8] ⚡ SKIPPING - Already have vipstream M3U8!');
+        }
+    } // End of else block for Steps 3.6-3.8
         }
 
         // ========================================
@@ -992,38 +902,38 @@ app.get('/api/extract', async (req, res) => {
 
         // 🚀 Use vipstream M3U8 if available, otherwise fall back to any M3U8
         if (vipstreamM3U8) {
-            foundM3U8 = vipstreamM3U8;
-            console.log('[Step 4] ⚡ Using already-captured vipstream M3U8!');
-        } else if (foundM3U8) {
-            console.log('[Step 4] Using fallback M3U8 (non-vipstream)');
-        } else {
-            console.log('[Step 4] Waiting for M3U8...');
+    foundM3U8 = vipstreamM3U8;
+    console.log('[Step 4] ⚡ Using already-captured vipstream M3U8!');
+} else if (foundM3U8) {
+    console.log('[Step 4] Using fallback M3U8 (non-vipstream)');
+} else {
+    console.log('[Step 4] Waiting for M3U8...');
 
-            for (let i = 0; i < 10; i++) { // Reduced from 20 to 10
-                await sleep(500); // Reduced from 800ms
+    for (let i = 0; i < 10; i++) { // Reduced from 20 to 10
+        await sleep(500); // Reduced from 800ms
 
-                if (vipstreamM3U8 || foundM3U8) {
-                    if (vipstreamM3U8) foundM3U8 = vipstreamM3U8;
-                    console.log(`[M3U8] ✅ Captured after ${(i + 1) * 0.5} seconds`);
-                    break;
-                }
+        if (vipstreamM3U8 || foundM3U8) {
+            if (vipstreamM3U8) foundM3U8 = vipstreamM3U8;
+            console.log(`[M3U8] ✅ Captured after ${(i + 1) * 0.5} seconds`);
+            break;
+        }
 
-                // Every 2 seconds, try clicking in frames
-                if (i % 4 === 0 && i > 0) {
-                    console.log(`[Wait] ${i * 0.5}s - Retrying...`);
-                    await closeAllPopups(browser, mainPage);
+        // Every 2 seconds, try clicking in frames
+        if (i % 4 === 0 && i > 0) {
+            console.log(`[Wait] ${i * 0.5}s - Retrying...`);
+            await closeAllPopups(browser, mainPage);
 
-                    for (const frame of page.frames()) {
-                        try {
-                            await frame.evaluate(() => {
-                                const v = document.querySelector('video');
-                                if (v) v.play().catch(() => { });
-                            });
-                        } catch (e) { }
-                    }
-                }
+            for (const frame of page.frames()) {
+                try {
+                    await frame.evaluate(() => {
+                        const v = document.querySelector('video');
+                        if (v) v.play().catch(() => { });
+                    });
+                } catch (e) { }
             }
         }
+    }
+}
 
         // ========================================
         // STEP 5: REMOVED - Subtitles are now captured from vfx.php network response
@@ -1032,96 +942,96 @@ app.get('/api/extract', async (req, res) => {
         // ========================================
 
     } catch (e) {
-        console.error('[Extract] Error:', e.message);
-        // Release extraction lock on error
-        isExtracting = false;
+    console.error('[Extract] Error:', e.message);
+    // Release extraction lock on error
+    isExtracting = false;
 
-        // Try cleanup even on error
-        try {
-            page.off('response', responseHandler);
-            page.off('request', requestHandler);
-            browser.off('targetcreated', popupHandler);
-            await page.setRequestInterception(false);
-        } catch (cleanupErr) { }
-
-        return res.status(500).json({ success: false, error: 'Extraction error: ' + e.message });
-    }
-
-    // Cleanup - IMPORTANT: remove all handlers and disable interception
+    // Try cleanup even on error
     try {
         page.off('response', responseHandler);
         page.off('request', requestHandler);
         browser.off('targetcreated', popupHandler);
         await page.setRequestInterception(false);
-    } catch (e) { }
+    } catch (cleanupErr) { }
 
-    // Return results
-    if (foundM3U8) {
-        const referer = capturedReferer || 'https://streamingnow.mov/';
-        const isVipstream = foundM3U8.includes('workers.dev');
-        console.log(`[Result] ✅ M3U8 FOUND ${isVipstream ? '(vipstream-S ⚡)' : '(fallback)'}`);
-        console.log(`[Result] M3U8: ${foundM3U8.substring(0, 80)}...`);
+    return res.status(500).json({ success: false, error: 'Extraction error: ' + e.message });
+}
 
-        const proxyBase = `http://${req.get('host')}`;
-        const proxiedM3U8 = `${proxyBase}/api/proxy/m3u8?url=${encodeURIComponent(foundM3U8)}&referer=${encodeURIComponent(referer)}`;
+// Cleanup - IMPORTANT: remove all handlers and disable interception
+try {
+    page.off('response', responseHandler);
+    page.off('request', requestHandler);
+    browser.off('targetcreated', popupHandler);
+    await page.setRequestInterception(false);
+} catch (e) { }
 
-        // PRIORITY: Use embedded subtitles from source (perfectly synced)
-        // Fall back to Subdl API only if no embedded found
-        let finalSubtitles = [];
+// Return results
+if (foundM3U8) {
+    const referer = capturedReferer || 'https://streamingnow.mov/';
+    const isVipstream = foundM3U8.includes('workers.dev');
+    console.log(`[Result] ✅ M3U8 FOUND ${isVipstream ? '(vipstream-S ⚡)' : '(fallback)'}`);
+    console.log(`[Result] M3U8: ${foundM3U8.substring(0, 80)}...`);
 
-        // 1. Check embedded subtitles (from PlayerJS config - best quality, synced)
-        if (embeddedSubtitles.length > 0) {
-            console.log(`[Result] 🎯 Using ${embeddedSubtitles.length} EMBEDDED subtitle(s) from source (perfectly synced)`);
-            // Proxy embedded subtitle URLs to avoid CORS issues
-            finalSubtitles = embeddedSubtitles.map(sub => ({
-                ...sub,
-                file: `${proxyBase}/api/proxy/segment?url=${encodeURIComponent(sub.file)}&referer=${encodeURIComponent(referer)}`
-            }));
-        }
-        // 2. Check direct network subtitles
-        else if (foundSubtitles.length > 0) {
-            console.log(`[Result] 📡 Using ${foundSubtitles.length} subtitle(s) from network requests`);
-            // Proxy network subtitle URLs to avoid CORS issues
-            finalSubtitles = foundSubtitles.map(sub => ({
-                ...sub,
-                file: `${proxyBase}/api/proxy/segment?url=${encodeURIComponent(sub.file)}&referer=${encodeURIComponent(referer)}`
-            }));
-        }
-        // 3. Fall back to Subdl API
-        else {
-            console.log('[Result] 📥 No embedded subtitles found, fetching from Subdl API...');
-            const subdlSubtitles = await fetchSubtitlesFromSubdl(
-                tmdbId,
-                type,
-                type === 'tv' ? season : null,
-                type === 'tv' ? episode : null
-            );
-            finalSubtitles = subdlSubtitles;
-        }
+    const proxyBase = `http://${req.get('host')}`;
+    const proxiedM3U8 = `${proxyBase}/api/proxy/m3u8?url=${encodeURIComponent(foundM3U8)}&referer=${encodeURIComponent(referer)}`;
 
-        // Release extraction lock
-        isExtracting = false;
+    // PRIORITY: Use embedded subtitles from source (perfectly synced)
+    // Fall back to Subdl API only if no embedded found
+    let finalSubtitles = [];
 
-        // Build response
-        const responseData = {
-            success: true,
-            m3u8Url: foundM3U8,
-            proxiedM3U8Url: proxiedM3U8,
-            subtitles: finalSubtitles,
-            referer: referer,
-            provider: 'vipstream-s'
-        };
-
-        // 💾 CACHE the successful result for instant future requests
-        setCachedStream(contentId, responseData);
-
-        res.json(responseData);
-    } else {
-        console.log('[Result] ❌ FAILED - No M3U8 found');
-        // Release extraction lock
-        isExtracting = false;
-        res.status(500).json({ success: false, error: 'Failed to extract M3U8 stream' });
+    // 1. Check embedded subtitles (from PlayerJS config - best quality, synced)
+    if (embeddedSubtitles.length > 0) {
+        console.log(`[Result] 🎯 Using ${embeddedSubtitles.length} EMBEDDED subtitle(s) from source (perfectly synced)`);
+        // Proxy embedded subtitle URLs to avoid CORS issues
+        finalSubtitles = embeddedSubtitles.map(sub => ({
+            ...sub,
+            file: `${proxyBase}/api/proxy/segment?url=${encodeURIComponent(sub.file)}&referer=${encodeURIComponent(referer)}`
+        }));
     }
+    // 2. Check direct network subtitles
+    else if (foundSubtitles.length > 0) {
+        console.log(`[Result] 📡 Using ${foundSubtitles.length} subtitle(s) from network requests`);
+        // Proxy network subtitle URLs to avoid CORS issues
+        finalSubtitles = foundSubtitles.map(sub => ({
+            ...sub,
+            file: `${proxyBase}/api/proxy/segment?url=${encodeURIComponent(sub.file)}&referer=${encodeURIComponent(referer)}`
+        }));
+    }
+    // 3. Fall back to Subdl API
+    else {
+        console.log('[Result] 📥 No embedded subtitles found, fetching from Subdl API...');
+        const subdlSubtitles = await fetchSubtitlesFromSubdl(
+            tmdbId,
+            type,
+            type === 'tv' ? season : null,
+            type === 'tv' ? episode : null
+        );
+        finalSubtitles = subdlSubtitles;
+    }
+
+    // Release extraction lock
+    isExtracting = false;
+
+    // Build response
+    const responseData = {
+        success: true,
+        m3u8Url: foundM3U8,
+        proxiedM3U8Url: proxiedM3U8,
+        subtitles: finalSubtitles,
+        referer: referer,
+        provider: 'vipstream-s'
+    };
+
+    // 💾 CACHE the successful result for instant future requests
+    setCachedStream(contentId, responseData);
+
+    res.json(responseData);
+} else {
+    console.log('[Result] ❌ FAILED - No M3U8 found');
+    // Release extraction lock
+    isExtracting = false;
+    res.status(500).json({ success: false, error: 'Failed to extract M3U8 stream' });
+}
 });
 
 // ============ PROXY ENDPOINTS ============
@@ -1215,6 +1125,202 @@ app.get('/api/proxy/segment', async (req, res) => {
     } catch (e) {
         console.error('[Proxy Seg] Error:', e.message);
         res.status(500).send('Segment Error');
+    }
+});
+
+// ============================================================
+// 🚀 FAST EXTRACTION ENDPOINT - No browser needed!
+// Uses direct HTTP requests for instant playback (< 1 second)
+// ============================================================
+app.get('/api/extract-fast', async (req, res) => {
+    const { tmdbId, imdbId, season, episode, type } = req.query;
+    const startTime = Date.now();
+
+    // Validation
+    if (!tmdbId && !imdbId) {
+        return res.status(400).json({ success: false, error: 'Missing tmdbId or imdbId' });
+    }
+    if (!type || !['movie', 'tv'].includes(type)) {
+        return res.status(400).json({ success: false, error: 'Invalid type' });
+    }
+    if (type === 'tv' && (!season || !episode)) {
+        return res.status(400).json({ success: false, error: 'Missing season/episode for TV' });
+    }
+
+    const contentId = `${type}-${tmdbId || imdbId}${type === 'tv' ? `-s${season}e${episode}` : ''}`;
+    console.log(`\n[Fast Extract] ⚡ ========== ${contentId} ==========`);
+
+    // Check cache first
+    const cached = getCachedStream(contentId);
+    if (cached) {
+        console.log(`[Fast Extract] ✅ Cache hit! (${Date.now() - startTime}ms)`);
+        return res.json(cached);
+    }
+
+    try {
+        const videoId = tmdbId || imdbId;
+        const proxyBase = `${req.protocol}://${req.get('host')}`;
+
+        // Step 1: Get the multiembed page to extract the token
+        console.log('[Fast Extract] Step 1: Fetching multiembed page for token...');
+        const multiembedUrl = type === 'movie'
+            ? `https://multiembed.mov/directstream.php?video_id=${videoId}&tmdb=${tmdbId ? 1 : 0}`
+            : `https://multiembed.mov/directstream.php?video_id=${videoId}&tmdb=${tmdbId ? 1 : 0}&s=${season}&e=${episode}`;
+
+        const multiembedResponse = await axios.get(multiembedUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml',
+                'Accept-Language': 'en-US,en;q=0.9'
+            },
+            timeout: 10000
+        });
+
+        // Extract token from streamingnow.mov/?play=TOKEN URL
+        // The multiembed page contains: https://streamingnow.mov/?play=BASE64TOKEN
+        let token = null;
+        const tokenPatterns = [
+            /streamingnow\.mov\/\?play=([A-Za-z0-9+/=]+)/,  // Main pattern
+            /\?play=([A-Za-z0-9+/=]{20,})/,                   // Simpler play= pattern
+            /token=([A-Za-z0-9+/=]{20,})/,                    // Legacy token= pattern
+        ];
+
+        for (const pattern of tokenPatterns) {
+            const match = multiembedResponse.data.match(pattern);
+            if (match && match[1]) {
+                token = match[1];
+                console.log(`[Fast Extract] ✅ Token found: ${token.substring(0, 30)}...`);
+                break;
+            }
+        }
+
+        if (!token) {
+            console.log('[Fast Extract] ❌ Token not found in multiembed response');
+            // Fallback to browser-based extraction
+            return res.redirect(`/api/extract?${new URLSearchParams(req.query).toString()}`);
+        }
+
+        // Step 2: Directly fetch vipstream_vfx.php with server ID 88 (workers.dev)
+        console.log('[Fast Extract] Step 2: Fetching vipstream with server=88...');
+        const vfxUrl = `https://streamingnow.mov/vipstream_vfx.php?s=88&token=${token}`;
+
+        const vfxResponse = await axios.get(vfxUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://streamingnow.mov/',
+                'Accept': 'text/html,application/xhtml+xml'
+            },
+            timeout: 10000
+        });
+
+        // Step 3: Extract M3U8 URL from the response
+        console.log('[Fast Extract] Step 3: Extracting M3U8 URL...');
+        let m3u8Url = null;
+
+        // Try workers.dev pattern first (preferred - highest quality)
+        const workersMatch = vfxResponse.data.match(/https?:\/\/[^"'\s<>]+\.workers\.dev[^"'\s<>]*/);
+        if (workersMatch) {
+            m3u8Url = workersMatch[0];
+            console.log(`[Fast Extract] ✅ Workers.dev M3U8: ${m3u8Url.substring(0, 60)}...`);
+        }
+
+        // Fallback: try any m3u8 URL
+        if (!m3u8Url) {
+            const m3u8Match = vfxResponse.data.match(/https?:\/\/[^"'\s<>]+\.m3u8[^"'\s<>]*/);
+            if (m3u8Match) {
+                m3u8Url = m3u8Match[0];
+                console.log(`[Fast Extract] ✅ M3U8 found: ${m3u8Url.substring(0, 60)}...`);
+            }
+        }
+
+        // Fallback: try Playerjs file: pattern
+        if (!m3u8Url) {
+            const fileMatch = vfxResponse.data.match(/file\s*:\s*["']([^"']+\.m3u8[^"']*)/);
+            if (fileMatch) {
+                m3u8Url = fileMatch[1];
+                console.log(`[Fast Extract] ✅ Playerjs file: ${m3u8Url.substring(0, 60)}...`);
+            }
+        }
+
+        if (!m3u8Url) {
+            console.log('[Fast Extract] ❌ M3U8 not found in vfx response, trying server 89...');
+
+            // Try server 89 as fallback
+            const vfx89Response = await axios.get(`https://streamingnow.mov/vipstream_vfx.php?s=89&token=${token}`, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Referer': 'https://streamingnow.mov/'
+                },
+                timeout: 10000
+            });
+
+            const fallbackMatch = vfx89Response.data.match(/https?:\/\/[^"'\s<>]+\.m3u8[^"'\s<>]*/);
+            if (fallbackMatch) {
+                m3u8Url = fallbackMatch[0];
+                console.log(`[Fast Extract] ✅ Server 89 M3U8: ${m3u8Url.substring(0, 60)}...`);
+            }
+        }
+
+        if (!m3u8Url) {
+            console.log('[Fast Extract] ❌ No M3U8 found, falling back to browser extraction');
+            return res.redirect(`/api/extract?${new URLSearchParams(req.query).toString()}`);
+        }
+
+        // Step 4: Extract subtitles from the response
+        console.log('[Fast Extract] Step 4: Extracting subtitles...');
+        const subtitles = [];
+
+        // Parse PlayerJS subtitle config: "subtitle":"[English]url,[Dutch]url,..."
+        const subtitleMatch = vfxResponse.data.match(/"subtitle"\s*:\s*"([^"]+)"/);
+        if (subtitleMatch && subtitleMatch[1]) {
+            const subtitleConfig = subtitleMatch[1];
+            const subRegex = /\[([^\]]+)\](https?:\/\/[^\s,\[\]]+\.vtt)/g;
+            let subMatch;
+
+            while ((subMatch = subRegex.exec(subtitleConfig)) !== null) {
+                const lang = subMatch[1].trim();
+                const url = subMatch[2].trim();
+
+                // Only keep English subtitles
+                if (lang.toLowerCase().includes('english') || lang.toLowerCase() === 'en') {
+                    const proxiedUrl = `${proxyBase}/api/proxy/segment?url=${encodeURIComponent(url)}&referer=${encodeURIComponent('https://streamingnow.mov/')}`;
+                    subtitles.push({
+                        label: lang,
+                        lang: 'en',
+                        file: proxiedUrl,
+                        source: 'embedded'
+                    });
+                    console.log(`[Fast Extract] ✅ Subtitle: ${lang}`);
+                }
+            }
+        }
+
+        // Build the result
+        const referer = 'https://streamingnow.mov/';
+        const proxiedM3U8 = `${proxyBase}/api/proxy/m3u8?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer)}`;
+
+        const result = {
+            success: true,
+            m3u8Url: m3u8Url,
+            proxiedM3U8Url: proxiedM3U8,
+            subtitles: subtitles,
+            referer: referer,
+            provider: 'vipstream-s-fast',
+            extractionTime: Date.now() - startTime
+        };
+
+        // Cache the result
+        setCachedStream(contentId, result);
+
+        console.log(`[Fast Extract] ⚡ DONE in ${result.extractionTime}ms!`);
+        return res.json(result);
+
+    } catch (error) {
+        console.error('[Fast Extract] ❌ Error:', error.message);
+
+        // Fallback to browser-based extraction on any error
+        console.log('[Fast Extract] Falling back to browser extraction...');
+        return res.redirect(`/api/extract?${new URLSearchParams(req.query).toString()}`);
     }
 });
 

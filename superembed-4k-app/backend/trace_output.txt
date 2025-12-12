@@ -1,0 +1,23 @@
+
+========== Tracing Flow for TMDB 238 ==========
+
+Step 1: Fetching multiembed: https://multiembed.mov/?video_id=238&tmdb=1
+Γ£à Found streamingnow URL: https://streamingnow.mov/?play=S0dtVVNUYUcxTUlWNGJ2QlRGb0tTaXFUVStmQ3NRakRNcXVrO...
+Γ£à Play token: S0dtVVNUYUcxTUlWNGJ2QlRGb0tTaXFUVStmQ3NRakRNcXVrOW...
+
+Step 2: Fetching streamingnow.mov with play token...
+Response length: 676545 bytes
+
+--- Testing with play token directly ---
+Testing: https://streamingnow.mov/vipstream_vfx.php?s=88&token=S0dtVVNUYUcxTUlWNGJ2QlRGb0tTaXFUVStmQ3NRakRNcX...
+Response length: 967 bytes
+Γ¥î No M3U8 found. Response preview: <!DOCTYPE html>
+<html>
+<head>
+	<meta name="referrer" content="no-referrer">	
+	<title>VIP stream 1</title>
+	<style>
+	  html,body{margin:0;padding:0;background:#000;color:#fff;width:100%;width:100vw;height:100%;height:100vh;}#player{width:100%!important;height:100%!important}
+	  </style>
+</head>
+<body

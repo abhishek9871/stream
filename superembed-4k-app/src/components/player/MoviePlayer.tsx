@@ -391,49 +391,75 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                 hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
                     console.log('[HLS] Manifest parsed, levels:', data.levels.length);
 
-                    // Parse quality levels with better resolution detection
+                    // Parse quality levels - prioritize actual resolution data over guessing
                     const qualityList = data.levels
                         .map((level, index) => {
+                            // Get actual height from manifest (most reliable)
                             let height = level.height || 0;
+                            let width = level.width || 0;
+                            let bitrate = level.bitrate || 0;
                             let label = '';
 
-                            // If no height, try to infer from bitrate or name
-                            if (!height && level.bitrate) {
-                                // Common bitrate-to-resolution mappings
-                                if (level.bitrate >= 12000000) height = 2160; // 4K
-                                else if (level.bitrate >= 8000000) height = 1440; // 2K
-                                else if (level.bitrate >= 4000000) height = 1080;
-                                else if (level.bitrate >= 2500000) height = 720;
-                                else if (level.bitrate >= 1000000) height = 480;
-                                else height = 360;
-                            }
-
-                            // If still no height, try to get from URL
+                            // Try to extract resolution from URL if not in manifest
                             if (!height && level.url && level.url[0]) {
                                 const urlStr = level.url[0].toLowerCase();
-                                if (urlStr.includes('2160') || urlStr.includes('4k')) height = 2160;
-                                else if (urlStr.includes('1440') || urlStr.includes('2k')) height = 1440;
-                                else if (urlStr.includes('1080')) height = 1080;
-                                else if (urlStr.includes('720')) height = 720;
-                                else if (urlStr.includes('480')) height = 480;
-                                else if (urlStr.includes('360')) height = 360;
+                                // Look for resolution patterns in URL
+                                const resMatch = urlStr.match(/(\d{3,4})p/);
+                                if (resMatch) {
+                                    height = parseInt(resMatch[1], 10);
+                                } else if (urlStr.includes('2160') || urlStr.includes('4k')) {
+                                    height = 2160;
+                                } else if (urlStr.includes('1440') || urlStr.includes('2k')) {
+                                    height = 1440;
+                                } else if (urlStr.includes('1080')) {
+                                    height = 1080;
+                                } else if (urlStr.includes('720')) {
+                                    height = 720;
+                                } else if (urlStr.includes('480')) {
+                                    height = 480;
+                                } else if (urlStr.includes('360')) {
+                                    height = 360;
+                                }
                             }
 
-                            // Create label based on height
-                            if (height >= 2160) label = '4K';
-                            else if (height >= 1440) label = '2K';
-                            else if (height >= 1080) label = '1080p';
-                            else if (height >= 720) label = '720p';
-                            else if (height >= 480) label = '480p';
-                            else if (height >= 360) label = '360p';
-                            else label = height > 0 ? `${height}p` : `Quality ${index + 1}`;
+                            // Create label based on actual height (don't guess from bitrate - it's unreliable)
+                            if (height >= 2160) {
+                                label = '4K';
+                            } else if (height >= 1440) {
+                                label = '1440p';
+                            } else if (height >= 1080) {
+                                label = '1080p';
+                            } else if (height >= 720) {
+                                label = '720p';
+                            } else if (height >= 480) {
+                                label = '480p';
+                            } else if (height >= 360) {
+                                label = '360p';
+                            } else if (height > 0) {
+                                label = `${height}p`;
+                            } else if (bitrate > 0) {
+                                // Only show bitrate-based label if we have no resolution info
+                                // Format bitrate nicely (e.g., "5.2 Mbps")
+                                const mbps = (bitrate / 1000000).toFixed(1);
+                                label = `${mbps} Mbps`;
+                            } else {
+                                // Last resort: show level number
+                                label = `Level ${index + 1}`;
+                            }
 
-                            console.log(`[HLS] Level ${index}: ${label} (${level.bitrate || 'unknown'} bps, ${level.height || 'no height'})`);
+                            console.log(`[HLS] Level ${index}: ${width}x${height} @ ${bitrate} bps → "${label}"`);
 
-                            return { index, height, label };
+                            // Use bitrate for sorting if height is 0 (higher bitrate = higher quality)
+                            const sortValue = height > 0 ? height : (bitrate > 0 ? bitrate / 10000 : index);
+
+                            return { index, height: sortValue, label, actualHeight: height, bitrate };
                         })
-                        .sort((a, b) => b.height - a.height);
+                        // Sort by quality (highest first)
+                        .sort((a, b) => b.height - a.height)
+                        // Remove duplicate labels (keep highest quality for each label)
+                        .filter((q, i, arr) => i === 0 || q.label !== arr[i - 1].label);
 
+                    console.log('[HLS] Quality list:', qualityList.map(q => q.label).join(', '));
                     setQualities(qualityList);
 
                     // Force highest quality level by default (not Auto)

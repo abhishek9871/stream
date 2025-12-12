@@ -1,0 +1,10 @@
+
+========== Deep Trace for TMDB 238 ==========
+
+Step 1: Fetching multiembed: https://multiembed.mov/?video_id=238&tmdb=1
+Γ£à Found streamingnow URL
+
+Step 2: Fetching streamingnow.mov...
+Response length: 676545 bytes
+
+--- Searching for token patterns ---

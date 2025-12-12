@@ -1,0 +1,22 @@
+[
+  "# get_network_request response\n## Request https://streamingnow.mov/?play=STJTWFFEdUcxTWtZNHJMTVRGb0tTaXFUVStmQ3NRakRNcXVtOWtJdmljS0xnQ1JMd21waWpFeTN6VHE1RDJJNmFiSUs0ZU9LUEo1TE9XcEhUTHJLOUt0cGc0aXZvTGhDUDhRV1IyMGR3Qnl4d0YyNERsQWRhOXBvK2tQanNvODBzc3FOQnVDRjl2UUJDVjJURjFqNjNER20=\nStatus:  [success - 200]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://streamingnow.mov/css/main.css?v=7\nStatus:  [success - 200]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap\nStatus:  [success - 200]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://www.cdn4ads.com/xa/enumbers.min.js\nStatus:  [success - 200]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://c.adsco.re/\nStatus:  [success - 200]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://c.adsco.re/\nStatus:  [success - 200]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://4.adsco.re/\nStatus:  [success - 200]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://6.adsco.re/\nStatus:  [success - 200]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://4.adsco.re:2087/\nStatus:  [success - 200]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://6.adsco.re:2087/\nStatus:  [success - 200]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request chrome-extension://invalid/\nStatus:  [failed - net::ERR_FAILED]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://wrpn8ihksnta.l4.adsco.re/\nStatus:  [failed - net::ERR_ABORTED]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://wrpn8ihksnta.n4.adsco.re/\nStatus:  [failed - net::ERR_ABORTED]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://wrpn8ihksnta.s4.adsco.re/\nStatus:  [success - 200]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://c.adsco.re/#0.46371811527836226\nStatus:  [success - 200]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://4.adsco.re/\nStatus:  [success - 200]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://6.adsco.re/\nStatus:  [success - 200]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://4.adsco.re:2087/\nStatus:  [success - 200]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://6.adsco.re:2087/\nStatus:  [success - 200]\n... (truncated for brevity) ...",
+  "# get_network_request response\n## Request https://c.adsco.re/\nStatus:  [success - 200]\n... (truncated for brevity) ..."
+]
