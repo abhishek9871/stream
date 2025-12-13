@@ -95,6 +95,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
     const [activeSubtitle, setActiveSubtitle] = useState<string | null>(null);
     const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
     const [subtitlesReady, setSubtitlesReady] = useState(false);
+    const [currentSubtitleText, setCurrentSubtitleText] = useState<string>('');
 
     // Playback Speed State
     const [playbackSpeed, setPlaybackSpeed] = useState(1);
@@ -673,8 +674,8 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                     // Find the text track and enable it
                     for (let i = 0; i < video.textTracks.length; i++) {
                         if (video.textTracks[i].label === sub.label) {
-                            video.textTracks[i].mode = 'showing';
-                            console.log(`[Player] 🎬 Subtitle enabled: ${sub.label}`);
+                            video.textTracks[i].mode = 'hidden';
+                            console.log(`[Player] 🎬 Subtitle enabled (hidden mode): ${sub.label}`);
                             break;
                         }
                     }
@@ -693,7 +694,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
             if (!firstTrackLoaded && bestSub && video.textTracks.length > 0) {
                 console.log(`[Player] ⚠️ Fallback: enabling first track (may not have loaded)`);
                 setActiveSubtitle(bestSub.file);
-                video.textTracks[0].mode = 'showing';
+                video.textTracks[0].mode = 'hidden';
             }
             setSubtitlesReady(true);
         }, 500);
@@ -724,7 +725,9 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
             if (targetSub) {
                 for (let i = 0; i < video.textTracks.length; i++) {
                     if (video.textTracks[i].label === targetSub.label) {
-                        video.textTracks[i].mode = 'showing';
+                        // Use 'hidden' mode - cues fire but don't render natively
+                        // Our custom overlay will display the subtitles
+                        video.textTracks[i].mode = 'hidden';
                         break;
                     }
                 }
@@ -733,6 +736,60 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
         setActiveSubtitle(subtitleFile);
         setShowSubtitleMenu(false);
     };
+
+    // Track subtitle cues for custom overlay (works with enhancement enabled)
+    useEffect(() => {
+        const video = videoRef.current;
+        if (!video) return;
+
+        // Function to update current subtitle text
+        const updateSubtitleText = () => {
+            let foundText = '';
+
+            for (let i = 0; i < video.textTracks.length; i++) {
+                const track = video.textTracks[i];
+                if (track.mode === 'showing' || track.mode === 'hidden') {
+                    const activeCues = track.activeCues;
+                    if (activeCues && activeCues.length > 0) {
+                        const texts: string[] = [];
+                        for (let j = 0; j < activeCues.length; j++) {
+                            const cue = activeCues[j] as VTTCue;
+                            if (cue && cue.text) {
+                                texts.push(cue.text);
+                            }
+                        }
+                        foundText = texts.join('\n');
+                        break;
+                    }
+                }
+            }
+
+            setCurrentSubtitleText(foundText);
+        };
+
+        // Listen to cuechange on all tracks
+        const handleCueChange = () => {
+            updateSubtitleText();
+        };
+
+        // Add listeners to all text tracks
+        for (let i = 0; i < video.textTracks.length; i++) {
+            video.textTracks[i].addEventListener('cuechange', handleCueChange);
+        }
+
+        // Also poll on timeupdate as a fallback
+        video.addEventListener('timeupdate', updateSubtitleText);
+
+        // Initial check
+        updateSubtitleText();
+
+        return () => {
+            for (let i = 0; i < video.textTracks.length; i++) {
+                video.textTracks[i].removeEventListener('cuechange', handleCueChange);
+            }
+            video.removeEventListener('timeupdate', updateSubtitleText);
+        };
+    }, [activeSubtitle, subtitlesReady]);
 
     const handleQualityChange = (index: number) => {
         setQuality(index);
@@ -938,11 +995,17 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
         >
+            {/* Video element - base layer */}
             <video
                 ref={videoRef}
                 crossOrigin="anonymous"
-                className={`w-full h-full transition-all duration-300 ${isZoomToFill ? 'object-cover' : 'object-contain'} ${enhancementEnabled && enhancerReady ? 'opacity-0' : 'opacity-100'}`}
-                style={{ filter: `brightness(${brightness})` }}
+                className={`absolute inset-0 w-full h-full transition-all duration-300 ${isZoomToFill ? 'object-cover' : 'object-contain'}`}
+                style={{
+                    filter: `brightness(${brightness})`,
+                    zIndex: 0,
+                    // Hide video visually when enhancement is on (canvas shows enhanced version)
+                    opacity: enhancementEnabled && enhancerReady ? 0 : 1
+                }}
                 onClick={togglePlay}
                 onTimeUpdate={handleTimeUpdate}
                 onEnded={() => {
@@ -961,14 +1024,37 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                 }}
             />
 
-            {/* Enhanced Video Canvas - WebGL Dolby Vision-like processing */}
+            {/* Enhanced Video Canvas - WebGL processing */}
             {enhancementSupported && (
                 <canvas
                     ref={enhancedCanvasRef}
                     onClick={togglePlay}
-                    className={`absolute inset-0 w-full h-full transition-opacity duration-300 ${enhancementEnabled && enhancerReady ? 'opacity-100 cursor-pointer' : 'opacity-0 pointer-events-none'} ${isZoomToFill ? 'object-cover' : 'object-contain'}`}
-                    style={{ filter: `brightness(${brightness})` }}
+                    className={`absolute inset-0 w-full h-full cursor-pointer ${enhancementEnabled && enhancerReady ? 'opacity-100' : 'opacity-0 pointer-events-none'} ${isZoomToFill ? 'object-cover' : 'object-contain'}`}
+                    style={{ filter: `brightness(${brightness})`, zIndex: 1 }}
                 />
+            )}
+
+            {/* Custom Subtitle Overlay - Always visible on top when there's text */}
+            {currentSubtitleText && (
+                <div
+                    className="absolute left-0 right-0 flex justify-center pointer-events-none px-4"
+                    style={{
+                        bottom: showControls ? '100px' : '40px',
+                        zIndex: 5,
+                        transition: 'bottom 0.3s ease'
+                    }}
+                >
+                    <div
+                        className="text-white text-center text-base sm:text-lg md:text-xl lg:text-2xl font-medium max-w-[90%] px-4 py-2 rounded"
+                        style={{
+                            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+                            textShadow: '2px 2px 4px rgba(0,0,0,1), -1px -1px 2px rgba(0,0,0,1)',
+                            lineHeight: 1.4,
+                            whiteSpace: 'pre-wrap'
+                        }}
+                        dangerouslySetInnerHTML={{ __html: currentSubtitleText.replace(/\n/g, '<br/>') }}
+                    />
+                </div>
             )}
 
             {loading && (
@@ -1046,9 +1132,9 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                 </div>
             )}
 
-            <div className={`absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-black/50 transition-opacity duration-300 pointer-events-none ${showControls || !isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
+            <div className={`absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-black/50 transition-opacity duration-300 pointer-events-none z-10 ${showControls || !isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
 
-            <div className={`absolute top-0 left-0 right-0 p-3 md:p-6 transition-opacity duration-300 ${showControls || !isPlaying ? 'opacity-100' : 'opacity-0'}`}>
+            <div className={`absolute top-0 left-0 right-0 p-3 md:p-6 transition-opacity duration-300 z-20 ${showControls || !isPlaying ? 'opacity-100' : 'opacity-0'}`}>
                 <div className="flex justify-between items-start gap-2">
                     <h2 className="text-white font-heading text-base sm:text-xl md:text-2xl lg:text-3xl font-bold tracking-wide drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)] line-clamp-1 flex-1">{title}</h2>
                     {onClose && (
@@ -1063,7 +1149,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
             </div>
 
             {!loading && (
-                <div className="absolute inset-0 hidden md:flex items-center justify-center pointer-events-none">
+                <div className="absolute inset-0 hidden md:flex items-center justify-center pointer-events-none z-15">
                     <button
                         onClick={togglePlay}
                         className={`flex items-center justify-center size-20 bg-black/50 backdrop-blur-sm text-white rounded-full transition-all duration-300 transform pointer-events-auto hover:scale-110 hover:bg-primary ${isPlaying ? 'opacity-0 scale-90' : 'opacity-100 scale-100'}`}
@@ -1104,7 +1190,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                 </div>
             )}
 
-            <div className={`absolute bottom-0 left-0 right-0 p-2 md:p-4 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
+            <div className={`absolute bottom-0 left-0 right-0 p-2 md:p-4 transition-opacity duration-300 z-20 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
                 <div className="flex flex-col gap-3">
                     <div
                         ref={timelineRef}
