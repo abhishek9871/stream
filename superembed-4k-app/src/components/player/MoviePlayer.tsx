@@ -382,7 +382,10 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                     maxBufferHole: 0.5,            // Allow small gaps
                     startFragPrefetch: true,       // Prefetch first fragment immediately
                     testBandwidth: false,          // Skip bandwidth test - use startLevel
-                    abrEwmaDefaultEstimate: 5000000, // Assume 5Mbps initially for faster start
+                    abrEwmaDefaultEstimate: 10000000, // Assume 10Mbps for high quality start
+                    // 🎯 FORCE HIGHEST QUALITY - Disable ABR
+                    autoStartLoad: true,
+                    startLevel: -1,                // Will be set after manifest parse
                     // 🔧 FAST ERROR RECOVERY for seeking
                     fragLoadingMaxRetry: 2,        // Reduced retries for faster failover
                     fragLoadingRetryDelay: 500,    // 500ms between retries (faster)
@@ -414,22 +417,46 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                                 const resMatch = urlStr.match(/(\d{3,4})p/);
                                 if (resMatch) {
                                     height = parseInt(resMatch[1], 10);
-                                } else if (urlStr.includes('2160') || urlStr.includes('4k')) {
+                                } else if (urlStr.includes('2160') || urlStr.includes('4k') || urlStr.includes('uhd')) {
                                     height = 2160;
-                                } else if (urlStr.includes('1440') || urlStr.includes('2k')) {
+                                } else if (urlStr.includes('1440') || urlStr.includes('2k') || urlStr.includes('qhd')) {
                                     height = 1440;
-                                } else if (urlStr.includes('1080')) {
+                                } else if (urlStr.includes('1080') || urlStr.includes('fhd') || urlStr.includes('fullhd')) {
                                     height = 1080;
-                                } else if (urlStr.includes('720')) {
+                                } else if (urlStr.includes('720') || urlStr.includes('hd')) {
                                     height = 720;
-                                } else if (urlStr.includes('480')) {
+                                } else if (urlStr.includes('480') || urlStr.includes('sd')) {
                                     height = 480;
                                 } else if (urlStr.includes('360')) {
+                                    height = 360;
+                                } else if (urlStr.includes('high')) {
+                                    height = 1080; // Assume "high" means 1080p
+                                } else if (urlStr.includes('medium') || urlStr.includes('med')) {
+                                    height = 720;
+                                } else if (urlStr.includes('low')) {
+                                    height = 480;
+                                }
+                            }
+
+                            // If still no height, estimate from bitrate (industry standard ranges)
+                            if (!height && bitrate > 0) {
+                                // These are typical bitrate ranges for different resolutions
+                                if (bitrate >= 15000000) { // 15+ Mbps → 4K
+                                    height = 2160;
+                                } else if (bitrate >= 8000000) { // 8-15 Mbps → 1080p
+                                    height = 1080;
+                                } else if (bitrate >= 5000000) { // 5-8 Mbps → 1080p (lower)
+                                    height = 1080;
+                                } else if (bitrate >= 2500000) { // 2.5-5 Mbps → 720p
+                                    height = 720;
+                                } else if (bitrate >= 1000000) { // 1-2.5 Mbps → 480p
+                                    height = 480;
+                                } else { // <1 Mbps → 360p
                                     height = 360;
                                 }
                             }
 
-                            // Create label based on actual height (don't guess from bitrate - it's unreliable)
+                            // Create label based on height
                             if (height >= 2160) {
                                 label = '4K';
                             } else if (height >= 1440) {
@@ -445,13 +472,20 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                             } else if (height > 0) {
                                 label = `${height}p`;
                             } else if (bitrate > 0) {
-                                // Only show bitrate-based label if we have no resolution info
-                                // Format bitrate nicely (e.g., "5.2 Mbps")
+                                // Only show bitrate-based label if we still have no resolution
                                 const mbps = (bitrate / 1000000).toFixed(1);
                                 label = `${mbps} Mbps`;
                             } else {
-                                // Last resort: show level number
-                                label = `Level ${index + 1}`;
+                                // Last resort: use quality descriptor based on level position
+                                if (data.levels.length === 1) {
+                                    label = 'Default';
+                                } else if (index === 0) {
+                                    label = 'Highest';
+                                } else if (index === data.levels.length - 1) {
+                                    label = 'Lowest';
+                                } else {
+                                    label = `Quality ${data.levels.length - index}`;
+                                }
                             }
 
                             console.log(`[HLS] Level ${index}: ${width}x${height} @ ${bitrate} bps → "${label}"`);
@@ -472,10 +506,20 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                     // Force highest quality level by default (not Auto)
                     if (qualityList.length > 0) {
                         const highestQuality = qualityList[0];
-                        console.log(`[HLS] Setting default quality to: ${highestQuality.label} (level ${highestQuality.index})`);
-                        hls.currentLevel = highestQuality.index; // Force current level
-                        hls.startLevel = highestQuality.index; // Set start level
-                        hls.loadLevel = highestQuality.index; // Force load level
+                        console.log(`[HLS] 🎯 FORCING quality to: ${highestQuality.label} (level ${highestQuality.index})`);
+
+                        // Set all level properties to force highest quality
+                        hls.currentLevel = highestQuality.index;   // Current level
+                        hls.nextLevel = highestQuality.index;      // Next segment level (immediate switch)
+                        hls.loadLevel = highestQuality.index;      // Level to load
+                        hls.startLevel = highestQuality.index;     // Start level
+
+                        // Disable auto level switching (ABR) to lock quality
+                        hls.autoLevelCapping = highestQuality.index;  // Cap at this quality (prevents lower)
+
+                        // Log the actual level being used
+                        console.log(`[HLS] Current level: ${hls.currentLevel}, Load level: ${hls.loadLevel}, Next level: ${hls.nextLevel}`);
+
                         setQuality(highestQuality.index);
                     } else {
                         setQuality(-1);
@@ -794,7 +838,20 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
     const handleQualityChange = (index: number) => {
         setQuality(index);
         if (hlsRef.current) {
-            hlsRef.current.currentLevel = index;
+            const hls = hlsRef.current;
+            if (index === -1) {
+                // Auto mode - enable ABR
+                hls.currentLevel = -1;
+                hls.autoLevelCapping = -1; // Remove capping
+                console.log('[HLS] Enabled Auto quality (ABR)');
+            } else {
+                // Manual quality - force specific level
+                hls.currentLevel = index;
+                hls.nextLevel = index;        // Immediate switch
+                hls.loadLevel = index;        // Load this level
+                hls.autoLevelCapping = index; // Cap at this level
+                console.log(`[HLS] 🎯 Forced quality to level ${index}`);
+            }
         }
         setShowQualityMenu(false);
     };
