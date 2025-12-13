@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { StreamContainer } from '@/components/player/StreamContainer';
 import { TMDB } from '@/lib/tmdb';
 
-export default function WatchPage() {
+// Inner component that uses useSearchParams (needs Suspense boundary)
+function WatchPageContent() {
     const params = useParams();
     const searchParams = useSearchParams();
     const router = useRouter();
@@ -57,5 +58,14 @@ export default function WatchPage() {
                 embedded={true}
             />
         </div>
+    );
+}
+
+// Wrap in Suspense to handle useSearchParams hydration properly
+export default function WatchPage() {
+    return (
+        <Suspense fallback={<div className="min-h-screen bg-black" />}>
+            <WatchPageContent />
+        </Suspense>
     );
 }

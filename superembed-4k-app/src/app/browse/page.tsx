@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Navbar } from '@/components/ui/Navbar';
 import { MediaCard } from '@/components/ui/MediaCard';
@@ -22,7 +22,8 @@ const categoryMeta: Record<string, { title: string; subtitle: string }> = {
     top_rated: { title: 'Top Rated', subtitle: 'Critically acclaimed masterpieces' }
 };
 
-export default function BrowsePage() {
+// Inner component that uses useSearchParams (needs Suspense boundary)
+function BrowsePageContent() {
     const searchParams = useSearchParams();
     const router = useRouter();
     const category = searchParams.get('category') || 'movies';
@@ -170,5 +171,18 @@ export default function BrowsePage() {
                 )}
             </div>
         </div>
+    );
+}
+
+// Wrap in Suspense to handle useSearchParams hydration properly
+export default function BrowsePage() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen bg-background flex items-center justify-center">
+                <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            </div>
+        }>
+            <BrowsePageContent />
+        </Suspense>
     );
 }

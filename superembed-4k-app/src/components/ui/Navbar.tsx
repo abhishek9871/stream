@@ -48,7 +48,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onSearchSelect, transparent = fa
                         </div>
                     ) : (
                         <div className="bg-white/5 border border-white/10 rounded-full px-4 py-2 hover:bg-white/10 hover:border-white/20 transition-all">
-                            <SearchBar onSelect={(item) => window.location.href = `/title/${item.id}?type=${item.media_type || 'movie'}`} />
+                            <SearchBar onSelect={(item) => router.push(`/title/${item.id}?type=${item.media_type || 'movie'}`)} />
                         </div>
                     )}
                 </div>

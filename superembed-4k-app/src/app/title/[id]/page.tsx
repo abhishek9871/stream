@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, Suspense } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { TMDB } from '@/lib/tmdb';
 import { Navbar } from '@/components/ui/Navbar';
 import { EpisodeSelector } from '@/components/ui/EpisodeSelector';
 
-export default function TitlePage() {
+// Inner component that uses useSearchParams (needs Suspense boundary)
+function TitlePageContent() {
     const params = useParams();
     const searchParams = useSearchParams();
     const router = useRouter();
@@ -26,7 +27,7 @@ export default function TitlePage() {
         const fetchDetails = async () => {
             setLoading(true);
             try {
-                // Determine type: if query param exists, use it. 
+                // Determine type: if query param exists, use it.
                 // Otherwise try movie, then tv? Or just assume movie if not specified?
                 // The MediaCard passes type, so we should always have it in URL ideally.
                 // But deep links might not.
@@ -43,7 +44,8 @@ export default function TitlePage() {
         fetchDetails();
     }, [id, typeQuery]);
 
-    const handlePlay = (s?: number, e?: number) => {
+    // Use useCallback to ensure stable function reference
+    const handlePlay = useCallback((s?: number, e?: number) => {
         if (!details) return;
 
         let url = `/watch/${details.id}`;
@@ -51,7 +53,7 @@ export default function TitlePage() {
             url += `?s=${s || currentSeason}&e=${e || currentEpisode}`;
         }
         router.push(url);
-    };
+    }, [details, currentSeason, currentEpisode, router]);
 
     if (loading || !details) {
         return (
@@ -109,13 +111,18 @@ export default function TitlePage() {
 
                         <div className="flex items-center gap-4 pt-4">
                             <button
-                                onClick={() => handlePlay()}
-                                className="px-8 py-3.5 bg-white text-black rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-200 transition-all transform hover:scale-105 shadow-lg shadow-white/10"
+                                type="button"
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handlePlay();
+                                }}
+                                className="px-8 py-3.5 bg-white text-black rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-200 transition-all transform hover:scale-105 shadow-lg shadow-white/10 cursor-pointer select-none"
                             >
                                 <span className="material-symbols-outlined text-2xl">play_arrow</span>
                                 {details.media_type === 'tv' ? 'Continue Watching' : 'Play Movie'}
                             </button>
-                            <button className="px-8 py-3.5 bg-white/5 backdrop-blur-md border border-white/10 text-white rounded-xl font-bold hover:bg-white/10 transition-all">
+                            <button type="button" className="px-8 py-3.5 bg-white/5 backdrop-blur-md border border-white/10 text-white rounded-xl font-bold hover:bg-white/10 transition-all">
                                 Trailer
                             </button>
                         </div>
@@ -184,5 +191,18 @@ export default function TitlePage() {
                 </div>
             </div>
         </div>
+    );
+}
+
+// Wrap in Suspense to handle useSearchParams hydration properly
+export default function TitlePage() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen bg-black flex items-center justify-center">
+                <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+            </div>
+        }>
+            <TitlePageContent />
+        </Suspense>
     );
 }
