@@ -54,6 +54,17 @@ class SuperEmbedService {
                     continue;
                 }
 
+                // Handle "browser session expired" (503) - auto retry
+                if (response.status === 503) {
+                    const errorData = await response.json().catch(() => ({}));
+                    if (errorData.retry) {
+                        retryCount++;
+                        console.log(`[SuperEmbedService] 🔄 Browser session expired, auto-retrying... (attempt ${retryCount}/${maxRetries})`);
+                        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s for browser restart
+                        continue;
+                    }
+                }
+
                 const data = await response.json();
 
                 if (data.success) {

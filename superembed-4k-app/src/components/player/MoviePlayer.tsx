@@ -382,6 +382,14 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                     startFragPrefetch: true,       // Prefetch first fragment immediately
                     testBandwidth: false,          // Skip bandwidth test - use startLevel
                     abrEwmaDefaultEstimate: 5000000, // Assume 5Mbps initially for faster start
+                    // 🔧 FAST ERROR RECOVERY for seeking
+                    fragLoadingMaxRetry: 2,        // Reduced retries for faster failover
+                    fragLoadingRetryDelay: 500,    // 500ms between retries (faster)
+                    fragLoadingMaxRetryTimeout: 8000, // Max 8s timeout
+                    levelLoadingMaxRetry: 2,       // Reduced level retries
+                    levelLoadingRetryDelay: 500,   // Faster level retry
+                    manifestLoadingMaxRetry: 2,    // Manifest retries
+                    manifestLoadingRetryDelay: 500,
                 });
 
                 hls.attachMedia(video);
@@ -482,18 +490,43 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                 });
 
                 hls.on(Hls.Events.ERROR, (_, data) => {
-                    if (data.fatal) {
-                        switch (data.type) {
-                            case Hls.ErrorTypes.NETWORK_ERROR:
-                                hls.startLoad();
-                                break;
-                            case Hls.ErrorTypes.MEDIA_ERROR:
-                                hls.recoverMediaError();
-                                break;
-                            default:
-                                hls.destroy();
-                                break;
+                    console.log('[HLS] Error:', data.type, data.details, data.fatal ? '(FATAL)' : '');
+
+                    // Handle non-fatal errors (like 403 on individual segments)
+                    if (!data.fatal) {
+                        // For fragment errors (including 403), HLS.js will auto-skip
+                        // Just log it for debugging
+                        if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR) {
+                            const response = data.response as { code?: number } | undefined;
+                            if (response?.code === 403) {
+                                console.log('[HLS] Segment 403 - skipping to next fragment');
+                            }
                         }
+                        return;
+                    }
+
+                    // Handle fatal errors
+                    switch (data.type) {
+                        case Hls.ErrorTypes.NETWORK_ERROR:
+                            console.log('[HLS] Network error, attempting recovery...');
+                            // Check if it's a 403 error on manifest/level
+                            const response = data.response as { code?: number } | undefined;
+                            if (response?.code === 403) {
+                                console.log('[HLS] 403 on manifest - token may have expired');
+                                setError('Stream expired. Please refresh to reload.');
+                            } else {
+                                hls.startLoad();
+                            }
+                            break;
+                        case Hls.ErrorTypes.MEDIA_ERROR:
+                            console.log('[HLS] Media error, attempting recovery...');
+                            hls.recoverMediaError();
+                            break;
+                        default:
+                            console.error('[HLS] Fatal error, destroying...');
+                            setError('Playback error. Please refresh.');
+                            hls.destroy();
+                            break;
                     }
                 });
 

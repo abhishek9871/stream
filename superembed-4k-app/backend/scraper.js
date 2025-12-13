@@ -109,27 +109,78 @@ let pageInstance = null;
 // Request lock to prevent concurrent extractions
 let isExtracting = false;
 let lastExtractionId = null;
+let extractionStartTime = null;
+const MAX_EXTRACTION_TIME = 60000; // 60 seconds max before auto-release
+
+// Helper: Release lock safely
+function releaseLock(reason = '') {
+    if (isExtracting) {
+        const duration = extractionStartTime ? Math.round((Date.now() - extractionStartTime) / 1000) : 0;
+        console.log(`[Lock] 🔓 Released (${reason}) after ${duration}s`);
+    }
+    isExtracting = false;
+    extractionStartTime = null;
+}
+
+// Helper: Check if lock is stale (held too long)
+function isLockStale() {
+    if (!isExtracting || !extractionStartTime) return false;
+    return Date.now() - extractionStartTime > MAX_EXTRACTION_TIME;
+}
 
 // ============ CACHE SYSTEM ============
 // Cache M3U8 URLs and subtitles by content ID (reduces repeat requests to instant)
 const streamCache = new Map();
-const CACHE_TTL = 2 * 60 * 60 * 1000; // 2 hours TTL
+const CACHE_TTL = 20 * 60 * 1000; // 20 minutes TTL (workers.dev tokens expire quickly)
+const failedSegmentCount = new Map(); // Track 403 errors per content
 
 function getCachedStream(contentId) {
     const cached = streamCache.get(contentId);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        // Check if this cache entry has had too many 403 errors (token likely expired)
+        const failures = failedSegmentCount.get(contentId) || 0;
+        if (failures >= 5) {
+            console.log(`[Cache] ⚠️ Invalidated ${contentId} due to ${failures} segment failures`);
+            streamCache.delete(contentId);
+            failedSegmentCount.delete(contentId);
+            return null;
+        }
         console.log(`[Cache] ✅ HIT for ${contentId} (age: ${Math.round((Date.now() - cached.timestamp) / 1000)}s)`);
         return cached.data;
     }
     if (cached) {
         console.log(`[Cache] ⏰ EXPIRED for ${contentId}`);
         streamCache.delete(contentId);
+        failedSegmentCount.delete(contentId);
     }
     return null;
 }
 
+// Track segment failures to detect expired tokens
+function trackSegmentFailure(url) {
+    // Find which content this segment belongs to based on URL patterns
+    for (const [contentId, cached] of streamCache.entries()) {
+        if (cached.data?.m3u8Url && url.includes('workers.dev')) {
+            // Check if this URL likely belongs to this content (same workers.dev subdomain)
+            try {
+                const cachedHost = new URL(cached.data.m3u8Url).host;
+                const failedHost = new URL(url).host;
+                if (cachedHost === failedHost) {
+                    const count = (failedSegmentCount.get(contentId) || 0) + 1;
+                    failedSegmentCount.set(contentId, count);
+                    if (count === 5) {
+                        console.log(`[Cache] ⚠️ ${contentId} has ${count} failures - will invalidate on next access`);
+                    }
+                    return;
+                }
+            } catch (e) {}
+        }
+    }
+}
+
 function setCachedStream(contentId, data) {
     streamCache.set(contentId, { data, timestamp: Date.now() });
+    failedSegmentCount.delete(contentId); // Clear any previous failure count
     console.log(`[Cache] 💾 Cached ${contentId} (total cached: ${streamCache.size})`);
 
     // Cleanup old entries if cache gets too big
@@ -232,23 +283,57 @@ app.get('/api/extract', async (req, res) => {
 
     // Check if another extraction is in progress
     if (isExtracting) {
-        console.log('[Extract] ⚠️ Another extraction in progress, please wait');
-        return res.status(429).json({ success: false, error: 'Extraction in progress, please wait' });
+        // Auto-release stale locks (held too long = something crashed)
+        if (isLockStale()) {
+            console.log(`[Extract] ⚠️ STALE LOCK detected (>${MAX_EXTRACTION_TIME/1000}s) - auto-releasing!`);
+            releaseLock('stale-auto-release');
+            // Force browser restart since previous extraction likely corrupted it
+            try {
+                if (browserInstance) {
+                    await browserInstance.close().catch(() => {});
+                }
+            } catch (e) {}
+            browserInstance = null;
+            pageInstance = null;
+        } else {
+            console.log('[Extract] ⚠️ Another extraction in progress, please wait');
+            return res.status(429).json({ success: false, error: 'Extraction in progress, please wait' });
+        }
     }
 
     isExtracting = true;
+    extractionStartTime = Date.now();
     lastExtractionId = contentId;
 
     // No more browser restart on content switch - just navigate to new URL
     const needsRestart = false;
 
     let browser, page;
-    try {
-        ({ browser, page } = await getBrowser(needsRestart));
-    } catch (e) {
-        console.error('[Browser] Launch failed:', e.message);
-        isExtracting = false;
-        return res.status(500).json({ success: false, error: 'Browser launch failed' });
+    let browserRetries = 0;
+    const MAX_BROWSER_RETRIES = 2;
+
+    while (browserRetries <= MAX_BROWSER_RETRIES) {
+        try {
+            // Force restart on retry (previous attempt corrupted the browser)
+            const forceRestart = browserRetries > 0;
+            ({ browser, page } = await getBrowser(forceRestart));
+            break; // Success, exit loop
+        } catch (e) {
+            browserRetries++;
+            console.error(`[Browser] Launch failed (attempt ${browserRetries}):`, e.message);
+
+            // Force cleanup on failure
+            browserInstance = null;
+            pageInstance = null;
+
+            if (browserRetries > MAX_BROWSER_RETRIES) {
+                releaseLock('browser-launch-failed');
+                return res.status(500).json({ success: false, error: 'Browser launch failed after retries' });
+            }
+
+            // Brief wait before retry
+            await sleep(1000);
+        }
     }
 
     const mainPage = page;
@@ -380,9 +465,40 @@ app.get('/api/extract', async (req, res) => {
 
     const requestHandler = (req) => req.continue();
 
-    await page.setRequestInterception(true);
-    page.on('request', requestHandler);
-    page.on('response', responseHandler);
+    // 🛡️ Setup page interception with error recovery
+    // This is critical: if page is corrupted, we need to restart browser
+    try {
+        await page.setRequestInterception(true);
+        page.on('request', requestHandler);
+        page.on('response', responseHandler);
+    } catch (setupError) {
+        console.error('[Setup] ❌ Page setup failed:', setupError.message);
+
+        // Check if this is a TargetCloseError (page context corrupted)
+        const isTargetClosed = setupError.message.includes('Target closed') ||
+                               setupError.message.includes('Protocol error') ||
+                               setupError.message.includes('Session closed');
+
+        if (isTargetClosed) {
+            console.log('[Setup] 🔄 Target closed detected - forcing browser restart...');
+            // Force browser restart
+            try {
+                if (browserInstance) await browserInstance.close().catch(() => {});
+            } catch (e) {}
+            browserInstance = null;
+            pageInstance = null;
+
+            releaseLock('target-closed-setup');
+            return res.status(503).json({
+                success: false,
+                error: 'Browser session expired, please retry',
+                retry: true
+            });
+        }
+
+        releaseLock('setup-failed');
+        return res.status(500).json({ success: false, error: 'Page setup failed: ' + setupError.message });
+    }
 
     try {
         // Build target URL
@@ -696,8 +812,12 @@ app.get('/api/extract', async (req, res) => {
 
     } catch (e) {
         console.error('[Extract] Error:', e.message);
-        // Release extraction lock on error
-        isExtracting = false;
+
+        // Check if this is a TargetCloseError (page context corrupted)
+        const isTargetClosed = e.message.includes('Target closed') ||
+                               e.message.includes('Protocol error') ||
+                               e.message.includes('Session closed') ||
+                               e.message.includes('Execution context');
 
         // Try cleanup even on error
         try {
@@ -707,6 +827,24 @@ app.get('/api/extract', async (req, res) => {
             await page.setRequestInterception(false);
         } catch (cleanupErr) { }
 
+        // Handle TargetCloseError - force browser restart
+        if (isTargetClosed) {
+            console.log('[Extract] 🔄 Target closed during extraction - forcing browser restart...');
+            try {
+                if (browserInstance) await browserInstance.close().catch(() => {});
+            } catch (closeErr) {}
+            browserInstance = null;
+            pageInstance = null;
+
+            releaseLock('target-closed-extraction');
+            return res.status(503).json({
+                success: false,
+                error: 'Browser session expired, please retry',
+                retry: true
+            });
+        }
+
+        releaseLock('extraction-error');
         return res.status(500).json({ success: false, error: 'Extraction error: ' + e.message });
     }
 
@@ -762,7 +900,7 @@ app.get('/api/extract', async (req, res) => {
         }
 
         // Release extraction lock
-        isExtracting = false;
+        releaseLock('success');
 
         // Build response
         const responseData = {
@@ -781,7 +919,7 @@ app.get('/api/extract', async (req, res) => {
     } else {
         console.log('[Result] ❌ FAILED - No M3U8 found');
         // Release extraction lock
-        isExtracting = false;
+        releaseLock('no-m3u8-found');
         res.status(500).json({ success: false, error: 'Failed to extract M3U8 stream' });
     }
 });
@@ -799,22 +937,35 @@ app.get('/api/proxy/m3u8', async (req, res) => {
 
     try {
         const baseUrl = decodedUrl.substring(0, decodedUrl.lastIndexOf('/') + 1);
+        const isWorkersUrl = decodedUrl.includes('workers.dev');
+
+        // Build headers for M3U8 request
+        const headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': decodedReferer
+        };
+
+        // For workers.dev, don't send Origin (causes issues)
+        if (!isWorkersUrl) {
+            headers['Origin'] = new URL(decodedReferer).origin;
+        }
 
         const response = await axios({
             method: 'get',
             url: decodedUrl,
             responseType: 'text',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': decodedReferer,
-                'Origin': new URL(decodedReferer).origin
-            },
+            headers: headers,
             timeout: 15000
         });
 
         let content = response.data;
         const proxyBase = `http://${req.get('host')}`;
-        const refererParam = `&referer=${encodeURIComponent(decodedReferer)}`;
+
+        // For segments from workers.dev, use the M3U8 URL as referer (what real players do)
+        const segmentReferer = isWorkersUrl ? decodedUrl : decodedReferer;
+        const refererParam = `&referer=${encodeURIComponent(segmentReferer)}`;
 
         const lines = content.split('\n');
         const rewritten = lines.map(line => {
@@ -839,6 +990,7 @@ app.get('/api/proxy/m3u8', async (req, res) => {
 
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+        res.setHeader('Cache-Control', 'no-cache'); // M3U8 playlists shouldn't be cached
         res.send(rewritten.join('\n'));
 
     } catch (e) {
@@ -854,33 +1006,115 @@ app.get('/api/proxy/segment', async (req, res) => {
     const decodedUrl = decodeURIComponent(url);
     const decodedReferer = referer ? decodeURIComponent(referer) : 'https://streamingnow.mov/';
 
+    // Determine the correct origin based on the URL
+    // For workers.dev CDN, we need to use a different approach
+    let segmentOrigin;
     try {
-        const response = await axios({
-            method: 'get',
-            url: decodedUrl,
-            responseType: 'arraybuffer',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': decodedReferer,
-                'Origin': new URL(decodedReferer).origin
-            },
-            timeout: 30000
-        });
-
-        if (decodedUrl.includes('.vtt')) res.setHeader('Content-Type', 'text/vtt');
-        else if (decodedUrl.includes('.srt')) res.setHeader('Content-Type', 'text/plain');
-        else if (response.headers['content-type']) res.setHeader('Content-Type', response.headers['content-type']);
-
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.send(response.data);
-
-    } catch (e) {
-        console.error('[Proxy Seg] Error:', e.message);
-        res.status(500).send('Segment Error');
+        const urlObj = new URL(decodedUrl);
+        segmentOrigin = urlObj.origin;
+    } catch {
+        segmentOrigin = new URL(decodedReferer).origin;
     }
+
+    // Build headers that match what a browser would send
+    const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'identity', // Don't compress video segments
+        'Referer': decodedReferer,
+        'Origin': segmentOrigin,
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'cross-site'
+    };
+
+    // For workers.dev URLs, minimal headers work best
+    if (decodedUrl.includes('workers.dev')) {
+        delete headers['Origin'];
+        delete headers['Sec-Fetch-Site'];
+        delete headers['Sec-Fetch-Dest'];
+        delete headers['Sec-Fetch-Mode'];
+        // Workers.dev CDN sometimes rejects requests with Referer
+        // Try without it for segments
+        if (!decodedUrl.includes('.m3u8')) {
+            delete headers['Referer'];
+        }
+    }
+
+    // Retry logic for transient failures
+    const MAX_RETRIES = 2;
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            const response = await axios({
+                method: 'get',
+                url: decodedUrl,
+                responseType: 'arraybuffer',
+                headers: headers,
+                timeout: 15000, // Reduced timeout for faster retry
+                maxRedirects: 5
+            });
+
+            if (decodedUrl.includes('.vtt')) res.setHeader('Content-Type', 'text/vtt');
+            else if (decodedUrl.includes('.srt')) res.setHeader('Content-Type', 'text/plain');
+            else if (response.headers['content-type']) res.setHeader('Content-Type', response.headers['content-type']);
+
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache segments for 1 hour
+            return res.send(response.data);
+
+        } catch (e) {
+            lastError = e;
+            const status = e.response?.status;
+
+            // For 403, try different header configurations
+            if (status === 403) {
+                if (attempt === 0) {
+                    // First retry: remove all extra headers
+                    delete headers['Origin'];
+                    delete headers['Referer'];
+                    delete headers['Sec-Fetch-Dest'];
+                    delete headers['Sec-Fetch-Mode'];
+                    delete headers['Sec-Fetch-Site'];
+                    continue;
+                } else if (attempt === 1) {
+                    // Second retry: try with just User-Agent
+                    Object.keys(headers).forEach(key => {
+                        if (key !== 'User-Agent' && key !== 'Accept') {
+                            delete headers[key];
+                        }
+                    });
+                    continue;
+                }
+                break;
+            }
+
+            // Don't retry on 404
+            if (status === 404) {
+                break;
+            }
+
+            // Retry on network errors or 5xx
+            if (attempt < MAX_RETRIES) {
+                await sleep(300);
+            }
+        }
+    }
+
+    // Track 403 failures to detect expired tokens
+    if (lastError?.response?.status === 403) {
+        trackSegmentFailure(decodedUrl);
+    } else {
+        // Only log non-403 errors to reduce log spam during seeking
+        console.error('[Proxy Seg] Error:', lastError?.message || 'Unknown error');
+    }
+    res.status(lastError?.response?.status || 500).send('Segment Error');
 });
 
 app.get('/health', (req, res) => {
+    const lockAge = extractionStartTime ? Math.round((Date.now() - extractionStartTime) / 1000) : 0;
     res.json({
         status: 'ok',
         uptime: process.uptime(),
@@ -889,7 +1123,51 @@ app.get('/health', (req, res) => {
             size: streamCache.size,
             entries: Array.from(streamCache.keys())
         },
-        extracting: isExtracting
+        extraction: {
+            inProgress: isExtracting,
+            contentId: lastExtractionId,
+            lockAge: lockAge,
+            isStale: isLockStale(),
+            maxTime: MAX_EXTRACTION_TIME / 1000
+        }
+    });
+});
+
+// Emergency lock release endpoint (for debugging)
+app.get('/api/lock/release', async (req, res) => {
+    if (!isExtracting) {
+        return res.json({ success: true, message: 'Lock was not held' });
+    }
+    console.log('[Lock] ⚠️ Manual lock release requested via API');
+    releaseLock('manual-api-release');
+
+    // Also restart browser to ensure clean state
+    try {
+        if (browserInstance) await browserInstance.close().catch(() => {});
+    } catch (e) {}
+    browserInstance = null;
+    pageInstance = null;
+
+    res.json({ success: true, message: 'Lock released and browser reset' });
+});
+
+// Report playback error - frontend can call this when video fails to play
+app.post('/api/playback/error', express.json(), (req, res) => {
+    const { contentId, errorType } = req.body;
+    if (!contentId) {
+        return res.status(400).json({ success: false, error: 'Missing contentId' });
+    }
+
+    console.log(`[Playback] ⚠️ Error reported for ${contentId}: ${errorType || 'unknown'}`);
+
+    // Invalidate cache for this content
+    const deleted = streamCache.delete(contentId);
+    failedSegmentCount.delete(contentId);
+
+    res.json({
+        success: true,
+        cacheCleared: deleted,
+        message: deleted ? 'Cache cleared, please retry' : 'No cache entry found'
     });
 });
 
