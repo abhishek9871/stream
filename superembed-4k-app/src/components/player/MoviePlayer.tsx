@@ -102,15 +102,12 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
     const PLAYBACK_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 
     // Video Enhancement State
-    const [enhancementEnabled, setEnhancementEnabled] = useState(() => {
-        if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem('videoEnhancement');
-            return saved === 'true';
-        }
-        return false;
-    });
+    // Always start with enhancement OFF to avoid WebGL context issues
+    // User can enable it after video loads
+    const [enhancementEnabled, setEnhancementEnabled] = useState(false);
     const [enhancerReady, setEnhancerReady] = useState(false);
     const enhancerRef = useRef<VideoEnhancer | null>(null);
+    const enhancerInitAttempted = useRef(false); // Prevent retry loops
     const enhancedCanvasRef = useRef<HTMLCanvasElement>(null);
     const [enhancementSupported] = useState(() => VideoEnhancer.isSupported());
 
@@ -527,6 +524,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                 enhancerRef.current.destroy();
                 enhancerRef.current = null;
             }
+            enhancerInitAttempted.current = false;
             setEnhancerReady(false);
         };
     }, []);
@@ -539,7 +537,10 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
         const canvas = enhancedCanvasRef.current;
 
         // Lazy initialize enhancer when first enabled
-        if (enhancementEnabled && !enhancerRef.current) {
+        // Only attempt once per component lifecycle to avoid retry loops
+        if (enhancementEnabled && !enhancerRef.current && !enhancerInitAttempted.current) {
+            enhancerInitAttempted.current = true;
+
             try {
                 const enhancer = new VideoEnhancer();
                 const initialized = enhancer.initialize(canvas);
@@ -551,14 +552,12 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                     console.warn('[MoviePlayer] VideoEnhancer failed to initialize, disabling enhancement');
                     setEnhancerReady(false);
                     setEnhancementEnabled(false);
-                    localStorage.setItem('videoEnhancement', 'false');
                     return;
                 }
             } catch (err) {
                 console.error('[MoviePlayer] VideoEnhancer error:', err);
                 setEnhancerReady(false);
                 setEnhancementEnabled(false);
-                localStorage.setItem('videoEnhancement', 'false');
                 return;
             }
         }
