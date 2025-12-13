@@ -122,6 +122,20 @@
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }
+
+  /* Carousel scroll container */
+  .scroll-container {
+    overflow-x: scroll !important;
+    -webkit-overflow-scrolling: touch;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scroll-container::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
 }
 
 /* Custom Scrollbar */
