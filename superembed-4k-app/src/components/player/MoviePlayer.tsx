@@ -934,6 +934,12 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
         }
     };
 
+    // Double-click to toggle fullscreen (desktop only)
+    const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        toggleFullscreen();
+    }, []);
+
     const toggleMute = () => {
         if (!videoRef.current) return;
         videoRef.current.muted = !videoRef.current.muted;
@@ -1078,6 +1084,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                     opacity: enhancementEnabled && enhancerReady ? 0 : 1
                 }}
                 onClick={togglePlay}
+                onDoubleClick={handleDoubleClick}
                 onTimeUpdate={handleTimeUpdate}
                 onEnded={() => {
                     setIsPlaying(false);
@@ -1100,6 +1107,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                 <canvas
                     ref={enhancedCanvasRef}
                     onClick={togglePlay}
+                    onDoubleClick={handleDoubleClick}
                     className={`absolute inset-0 w-full h-full cursor-pointer ${enhancementEnabled && enhancerReady ? 'opacity-100' : 'opacity-0 pointer-events-none'} ${isZoomToFill ? 'object-cover' : 'object-contain'}`}
                     style={{ filter: `brightness(${brightness})`, zIndex: 1 }}
                 />
