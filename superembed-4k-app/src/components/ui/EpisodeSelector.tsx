@@ -65,8 +65,8 @@ export const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                         key={season.id}
                         onClick={() => setSelectedSeason(season.season_number)}
                         className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${selectedSeason === season.season_number
-                                ? 'bg-primary text-white shadow-lg shadow-primary/25'
-                                : 'bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-white'
+                            ? 'bg-primary text-white shadow-lg shadow-primary/25'
+                            : 'bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-white'
                             }`}
                     >
                         {season.name}
@@ -90,8 +90,8 @@ export const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                                     key={episode.id}
                                     onClick={() => onEpisodeSelect(selectedSeason, episode.episode_number)}
                                     className={`group relative flex items-start gap-4 p-3 rounded-xl cursor-pointer border transition-all duration-300 ${isCurrent
-                                            ? 'bg-primary/10 border-primary/50'
-                                            : 'bg-black/20 border-transparent hover:bg-white/5 hover:border-white/10'
+                                        ? 'bg-primary/10 border-primary/50'
+                                        : 'bg-black/20 border-transparent hover:bg-white/5 hover:border-white/10'
                                         }`}
                                 >
                                     {/* Thumbnail */}
@@ -109,7 +109,7 @@ export const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                                         )}
 
                                         {/* Play Overlay */}
-                                        <div className={`absolute inset-0 flex items-center justify-center bg-black/50 transition-opacity ${isCurrent ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                                        <div className={`absolute inset-0 flex items-center justify-center bg-black/50 transition-opacity pointer-events-none ${isCurrent ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                                             <span className="material-symbols-outlined text-white text-3xl">
                                                 {isCurrent ? 'equalizer' : 'play_circle'}
                                             </span>

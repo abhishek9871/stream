@@ -77,11 +77,11 @@ export default function TitlePage() {
                         alt={details.title || details.name}
                         className="w-full h-full object-cover"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent" />
-                    <div className="absolute inset-0 bg-gradient-to-r from-background via-background/80 to-transparent" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent pointer-events-none" />
+                    <div className="absolute inset-0 bg-gradient-to-r from-background via-background/80 to-transparent pointer-events-none" />
                 </div>
 
-                <div className="absolute inset-0 flex items-center px-4 md:px-12 lg:px-24 pt-20">
+                <div className="absolute inset-0 flex items-center px-4 md:px-12 lg:px-24 pt-20 z-10">
                     <div className="max-w-3xl space-y-6 animate-slide-up">
                         <div className="flex items-center gap-3">
                             {details.media_type === 'tv' && (

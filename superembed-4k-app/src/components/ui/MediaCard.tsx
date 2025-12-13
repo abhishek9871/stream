@@ -16,15 +16,22 @@ export const MediaCard: React.FC<MediaCardProps> = ({ media, onClick, rank, show
     const year = releaseDate ? releaseDate.substring(0, 4) : '';
     const isTv = media.media_type === 'tv' || !!media.first_air_date;
 
+    const handleClick = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onClick(media);
+    };
+
     return (
         <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             whileInView={{ opacity: 1, scale: 1 }}
             viewport={{ once: true }}
-            whileHover={{ scale: 1.05, y: -10, zIndex: 20 }}
+            whileHover={{ scale: 1.05, y: -10 }}
             transition={{ duration: 0.3, ease: 'easeOut' }}
             className="relative group cursor-pointer"
-            onClick={() => onClick(media)}
+            style={{ zIndex: 1 }}
+            onClick={handleClick}
         >
             {/* Rank Badge */}
             {rank && (
@@ -33,7 +40,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({ media, onClick, rank, show
                 </div>
             )}
 
-            <div className="relative rounded-xl overflow-hidden aspect-[2/3] shadow-xl border border-white/5 bg-zinc-900 group-hover:shadow-2xl group-hover:shadow-primary/20 transition-all duration-500">
+            <div className="relative rounded-xl overflow-hidden aspect-[2/3] shadow-xl border border-white/5 bg-zinc-900 group-hover:shadow-2xl group-hover:shadow-primary/20 transition-all duration-500 group-hover:z-20">
                 <img
                     src={TMDB.getImageUrl(media.poster_path)}
                     alt={title}
@@ -67,7 +74,10 @@ export const MediaCard: React.FC<MediaCardProps> = ({ media, onClick, rank, show
                         </div>
                     </div>
 
-                    <button className="w-full bg-white text-black py-2.5 rounded-lg font-bold text-sm flex items-center justify-center gap-2 hover:bg-zinc-200 transition-all active:scale-95 shadow-lg shadow-white/5">
+                    <button 
+                        onClick={handleClick}
+                        className="w-full bg-white text-black py-2.5 rounded-lg font-bold text-sm flex items-center justify-center gap-2 hover:bg-zinc-200 transition-all active:scale-95 shadow-lg shadow-white/5"
+                    >
                         <span className="material-symbols-outlined text-lg">play_arrow</span>
                         Watch
                     </button>
@@ -76,3 +86,4 @@ export const MediaCard: React.FC<MediaCardProps> = ({ media, onClick, rank, show
         </motion.div>
     );
 };
+

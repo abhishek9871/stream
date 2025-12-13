@@ -38,12 +38,12 @@ export const Hero: React.FC<HeroProps> = ({ movies, onPlay }) => {
                                 className="w-full h-full object-cover"
                             />
                             {/* Cinematic Gradient Overlay */}
-                            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
-                            <div className="absolute inset-0 bg-gradient-to-r from-black via-black/50 to-transparent" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent pointer-events-none" />
+                            <div className="absolute inset-0 bg-gradient-to-r from-black via-black/50 to-transparent pointer-events-none" />
                         </div>
 
                         {/* Content */}
-                        <div className="absolute inset-0 flex items-center px-4 md:px-12 lg:px-24 pb-32">
+                        <div className="absolute inset-0 flex items-center px-4 md:px-12 lg:px-24 pb-32 z-10">
                             <div className="max-w-2xl pt-20">
                                 <div className="flex items-center gap-3 mb-4 opacity-0 animate-slide-up" style={{ animationDelay: '0.2s' }}>
                                     <span className="px-2 py-1 bg-white/10 backdrop-blur-md rounded border border-white/20 text-xs font-bold text-white uppercase tracking-wider">
