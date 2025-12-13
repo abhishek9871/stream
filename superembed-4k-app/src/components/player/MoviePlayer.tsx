@@ -115,6 +115,22 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
+    // Safe play function that handles AbortError (when play is interrupted by pause/seek/quality change)
+    const safePlay = useCallback(async (video: HTMLVideoElement) => {
+        try {
+            await video.play();
+            setIsPlaying(true);
+        } catch (err) {
+            // AbortError is expected when play() is interrupted - ignore it
+            if (err instanceof Error && err.name === 'AbortError') {
+                // This is fine - play was interrupted by pause/seek/quality change
+                return;
+            }
+            // Other errors (like NotAllowedError for autoplay) - set not playing
+            setIsPlaying(false);
+        }
+    }, []);
+
     // Auto-hide controls after inactivity
     const HIDE_CONTROLS_DELAY = 3000;
 
@@ -529,8 +545,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                     addSubtitleTracks(video);
 
                     if (autoplay) {
-                        video.play().catch(() => setIsPlaying(false));
-                        setIsPlaying(true);
+                        safePlay(video);
                     }
                 });
 
@@ -581,7 +596,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
                 video.src = extracted.m3u8Url;
                 video.addEventListener('loadedmetadata', () => {
                     setLoading(false);
-                    if (autoplay) video.play();
+                    if (autoplay) safePlay(video);
                 });
                 addSubtitleTracks(video);
             }
@@ -860,8 +875,7 @@ export const MoviePlayer: React.FC<NativePlayerProps> = ({
         const video = videoRef.current;
         if (!video) return;
         if (video.paused) {
-            video.play();
-            setIsPlaying(true);
+            safePlay(video);
         } else {
             video.pause();
             setIsPlaying(false);
